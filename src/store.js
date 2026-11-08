@@ -38,6 +38,21 @@ export async function listItems() {
   return all.sort((a, b) => (b.createdAt || "").localeCompare(a.createdAt || ""));
 }
 export const putItem = (item) => run("items", "readwrite", (s) => s.put(item));
+export const getItem = (id) => run("items", "readonly", (s) => s.get(id));
+
+// Serialize patches so quick edits (title, note, tags) never overwrite each other.
+let queue = Promise.resolve();
+export function patchItem(id, fields) {
+  queue = queue.catch(() => {}).then(async () => {
+    const cur = await getItem(id);
+    if (!cur) return null;
+    const f = typeof fields === "function" ? fields(cur) : fields;
+    const next = { ...cur, ...f, updatedAt: new Date().toISOString() };
+    await putItem(next);
+    return next;
+  });
+  return queue;
+}
 export const deleteItem = (id) => run("items", "readwrite", (s) => s.delete(id));
 export const putFile = (id, blob) => run("files", "readwrite", (s) => s.put(blob, id));
 export const getFile = (id) => run("files", "readonly", (s) => s.get(id));
