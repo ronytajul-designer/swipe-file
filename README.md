@@ -24,7 +24,7 @@ Every item keeps a **source link**, the page you found it on, so you can go back
 
 - **Top:** title (click to rename), close. Items that have both a screenshot and a link get a `Saved / Live site` switch; Live site shows the page inside the viewer at desktop or mobile width.
 - **Middle:** the thing you saved. Long screenshots scroll in full, videos and GIFs play.
-- **Bottom:** category, the source link (opens the site, pencil to change it, or a box to add one), Delete.
+- **Bottom:** category, tags (`+ Tag`, type, Enter; earlier tags are suggested, Backspace removes the last one), the source link (opens the site, pencil to change it, or a box to add one), Delete.
 
 While the viewer is open, pasting a URL sets it as the source link, and pasting an image replaces the screenshot. Some sites block being shown inside another page; use the source link button for those.
 

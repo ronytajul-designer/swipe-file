@@ -349,15 +349,59 @@ function StageImage({ src, onDims, onBroken }) {
   );
 }
 
+/* ---------- tags: chips + one inline input, Enter to add ---------- */
+function TagRow({ it, patch, allTags }) {
+  const [adding, setAdding] = useState(false);
+  const [d, setD] = useState("");
+  const tags = it.tags || [];
+  const add = (raw) => {
+    const t = raw.trim().toLowerCase().replace(/^#/, "").replace(/\s+/g, "-");
+    if (t) patch(it.id, (cur) => ({ tags: (cur.tags || []).includes(t) ? cur.tags : [...(cur.tags || []), t] }));
+    setD("");
+  };
+  const q = d.trim().toLowerCase().replace(/^#/, "");
+  const sugg = allTags.filter((t) => !tags.includes(t) && (!q || t.includes(q))).slice(0, 6);
+  return (
+    <div className="tagrow">
+      <AnimatePresence initial={false}>
+        {tags.map((t) => (
+          <motion.span layout key={t} className="tagchip" initial={{ opacity: 0, scale: 0.85 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.85 }} transition={spring}>
+            #{t}
+            <button type="button" aria-label={"Remove tag " + t} onClick={() => patch(it.id, (cur) => ({ tags: (cur.tags || []).filter((x) => x !== t) }))}><Icon.x /></button>
+          </motion.span>
+        ))}
+      </AnimatePresence>
+      {adding ? (
+        <span className="tag-add-wrap">
+          <input autoFocus value={d} placeholder="tag, Enter" aria-label="New tag" onChange={(e) => setD(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" || e.key === ",") { e.preventDefault(); add(d); }
+              if (e.key === "Escape") { e.stopPropagation(); setAdding(false); setD(""); }
+              if (e.key === "Backspace" && !d && tags.length) patch(it.id, (cur) => ({ tags: (cur.tags || []).slice(0, -1) }));
+            }}
+            onBlur={() => { if (d.trim()) add(d); setAdding(false); }} />
+          {!!sugg.length && (
+            <span className="tag-sugg">
+              {sugg.map((t) => <button key={t} type="button" onMouseDown={(e) => { e.preventDefault(); add(t); }}>#{t}</button>)}
+            </span>
+          )}
+        </span>
+      ) : (
+        <button type="button" className="tag-add" onClick={() => setAdding(true)}><Icon.plus /> Tag</button>
+      )}
+    </div>
+  );
+}
+
 /* ---------- detail: the saved thing, its source link, delete. Nothing else. ---------- */
-function Detail({ it, onClose, patch, remove, setImage, toast, onPrev, onNext, linkFocus }) {
+function Detail({ it, onClose, patch, remove, setImage, toast, onPrev, onNext, linkFocus, allTags }) {
   const [broken, setBroken] = useState(false);
   const kind = kindOf(it, broken);
   const link = safeUrl(it.url);
   const canLive = link.startsWith("https:");
   const hasMedia = kind === "media";
   const [mode, setMode] = useState("saved");
-  const [device, setDevice] = useState("desktop");
+  const [device, setDevice] = useState(() => (window.innerWidth < 860 ? "mobile" : "desktop"));
   const [title, setTitle] = useState(it.title || "");
   const [editLink, setEditLink] = useState(!link || !!linkFocus);
   const [url, setUrl] = useState(it.url || "");
@@ -421,9 +465,12 @@ function Detail({ it, onClose, patch, remove, setImage, toast, onPrev, onNext, l
       </div>
 
       <footer className="dv-foot">
-        <label className="found-chip" title="Category"><i style={{ background: color(it.type) }} />
-          <select value={it.type} aria-label="Category" onChange={(e) => patch(it.id, { type: e.target.value, autoType: false })}>{TYPES.map((t) => <option key={t}>{t}</option>)}</select>
-        </label>
+        <div className="foot-left">
+          <label className="found-chip" title="Category"><i style={{ background: color(it.type) }} />
+            <select value={it.type} aria-label="Category" onChange={(e) => patch(it.id, { type: e.target.value, autoType: false })}>{TYPES.map((t) => <option key={t}>{t}</option>)}</select>
+          </label>
+          <TagRow it={it} patch={patch} allTags={allTags} />
+        </div>
 
         <div className="source">
           {link && !editLink ? (
@@ -855,7 +902,7 @@ export default function App() {
       <Modal open={!!current} onClose={() => { setOpenId(null); setLinkFocus(null); }} label="Reference" className="detail">
         {current && (
           <Detail key={current.id} it={current} onClose={() => { setOpenId(null); setLinkFocus(null); }} patch={patch} remove={remove} setImage={setImage}
-            toast={toast} onPrev={() => step(-1)} onNext={() => step(1)} linkFocus={linkFocus === current.id} />
+            toast={toast} onPrev={() => step(-1)} onNext={() => step(1)} linkFocus={linkFocus === current.id} allTags={tagList} />
         )}
       </Modal>
       <Modal open={backup} onClose={() => setBackup(false)} label="Backup" className="small">
