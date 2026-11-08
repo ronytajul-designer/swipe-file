@@ -22,7 +22,7 @@ const slug = (t) => "sec-" + t.toLowerCase().replace(/\s+/g, "-");
 const MAX = 20 * 1024 * 1024;
 const spring = { type: "spring", stiffness: 420, damping: 38, mass: 0.8 };
 const soft = { type: "spring", stiffness: 300, damping: 34 };
-const DENSITY = [160, 200, 240, 290, 340];
+const DENSITY = [220, 280, 340, 420, 520]; // min card width per step; 340 is 100%
 
 /* ---------- helpers ---------- */
 const host = (u) => { try { return new URL(u).hostname.replace(/^www\./, ""); } catch { return ""; } };
@@ -65,7 +65,7 @@ function useSize(ref) {
   }, [ref]);
   return s;
 }
-function useColumns(ref, min, gap = 20, max = 7) {
+function useColumns(ref, min, gap = 24, max = 6) {
   const { w } = useSize(ref);
   return w ? Math.max(1, Math.min(max, Math.floor((w + gap) / (min + gap)))) : 4;
 }
@@ -784,8 +784,6 @@ export default function App() {
   }, [openId, backup, composer, current, step, setImage, createFromFile, createFromText, surprise]);
 
   const min = DENSITY[density];
-  const hour = new Date().getHours();
-  const greet = hour < 5 ? "Good night." : hour < 12 ? "Good morning." : hour < 18 ? "Good afternoon." : "Good evening.";
 
   return (
     <div className="app" ref={rootRef}>
@@ -820,9 +818,6 @@ export default function App() {
 
       <main className="page">
         <section className="hello">
-          <p className="eyebrow">{items.length ? `${items.length} things saved` : "Your library is empty"}</p>
-          <h1>{greet}</h1>
-          <p className="hello-sub">{items.length ? "What are you designing today? Search it, or let a random pick surprise you." : "Paste a link, a screenshot or a video anywhere on this page. It lands in the right place automatically."}</p>
           {!!items.length && (
             <div className="mchips" role="toolbar" aria-label="Browse">
               {[["all", "Everything"], ["latest", "Latest"], ["fav", "Favorites"]].map(([k, l]) => (
@@ -845,7 +840,7 @@ export default function App() {
         {!ready ? null : !items.length ? (
           <motion.div className="empty" initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={spring}>
             <h2>Nothing here yet</h2>
-            <p>Start with one thing that inspired you today.</p>
+            <p>Paste a link, a screenshot or a video anywhere on this page. It lands in the right place automatically.</p>
             <button className="black-pill" type="button" onClick={() => setComposer(true)}><Icon.plus /> Save your first reference</button>
           </motion.div>
         ) : !filtered.length ? (
@@ -879,7 +874,7 @@ export default function App() {
       <div className="corner right">
         <div className="white-pill static density" role="group" aria-label="Card size">
           <button type="button" onClick={() => setDensity((d) => Math.max(0, d - 1))} disabled={density === 0} aria-label="Smaller cards"><Icon.minus /></button>
-          <span>{Math.round((DENSITY[density] / 240) * 100)}%</span>
+          <span>{Math.round((DENSITY[density] / 340) * 100)}%</span>
           <button type="button" onClick={() => setDensity((d) => Math.min(DENSITY.length - 1, d + 1))} disabled={density === DENSITY.length - 1} aria-label="Bigger cards"><Icon.plus /></button>
         </div>
       </div>
