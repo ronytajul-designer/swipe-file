@@ -2,8 +2,9 @@
 import Lenis from "lenis";
 import { gsap } from "gsap";
 import { ScrollTrigger } from "gsap/ScrollTrigger";
+import { SplitText } from "gsap/SplitText";
 
-gsap.registerPlugin(ScrollTrigger);
+gsap.registerPlugin(ScrollTrigger, SplitText);
 
 export const reduced = () => window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
@@ -22,4 +23,10 @@ export const lockScroll = (on) => {
 };
 export const scrollTop = () => (lenis ? lenis.scrollTo(0, { duration: 0.8 }) : window.scrollTo({ top: 0, behavior: "smooth" }));
 
-export { gsap, ScrollTrigger };
+export const scrollToEl = (el, offset = -96) => {
+  if (!el) return;
+  if (lenis) lenis.scrollTo(el, { offset, duration: 1.2 });
+  else window.scrollTo({ top: el.getBoundingClientRect().top + window.scrollY + offset, behavior: "smooth" });
+};
+
+export { gsap, ScrollTrigger, SplitText };

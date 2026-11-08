@@ -4,11 +4,19 @@ const S = ({ children, fill = "none", size = 18 }) => (
 );
 export const Icon = {
   logo: () => (
-    <svg width="26" height="26" viewBox="0 0 32 32" aria-hidden="true">
-      <rect x="4" y="9" width="17" height="19" rx="3" fill="none" stroke="currentColor" strokeWidth="1.8" />
-      <rect x="11" y="4" width="17" height="19" rx="3" fill="var(--accent)" />
+    <svg width="28" height="28" viewBox="0 0 32 32" aria-hidden="true">
+      <circle cx="16" cy="16" r="16" fill="#111" />
+      <rect x="8.5" y="11" width="10" height="12" rx="2" fill="none" stroke="#fff" strokeWidth="1.6" />
+      <rect x="13.5" y="8" width="10" height="12" rx="2" fill="var(--accent)" />
     </svg>
   ),
+  search: () => <S><circle cx="11" cy="11" r="7" /><path d="M20 20l-4-4" /></S>,
+  bookmark: () => <S><path d="M6 4h12v17l-6-4-6 4z" /></S>,
+  bookmarkFill: () => <S fill="currentColor"><path d="M6 4h12v17l-6-4-6 4z" /></S>,
+  sparkle: () => <S><path d="M12 3v4M12 17v4M3 12h4M17 12h4M6 6l2.5 2.5M15.5 15.5L18 18M18 6l-2.5 2.5M8.5 15.5L6 18" /></S>,
+  minus: () => <S><path d="M5 12h14" /></S>,
+  grid: () => <S size={16}><rect x="4" y="4" width="7" height="7" rx="1.5" /><rect x="13" y="4" width="7" height="7" rx="1.5" /><rect x="4" y="13" width="7" height="7" rx="1.5" /><rect x="13" y="13" width="7" height="7" rx="1.5" /></S>,
+  clock: () => <S size={16}><circle cx="12" cy="12" r="8.5" /><path d="M12 7.5V12l3 2" /></S>,
   plus: () => <S><path d="M12 5v14M5 12h14" /></S>,
   x: () => <S size={16}><path d="M6 6l12 12M18 6L6 18" /></S>,
   star: () => <S><path d="M12 3.5l2.6 5.4 5.9.8-4.3 4.1 1 5.8L12 16.9l-5.2 2.7 1-5.8-4.3-4.1 5.9-.8z" /></S>,
