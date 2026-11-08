@@ -298,6 +298,7 @@ kbd.inv { background: rgb(255 255 255 / .14); color: rgb(255 255 255 / .7); }
 .source-pill { display: inline-flex; align-items: center; gap: 9px; height: 46px; padding: 0 18px; border-radius: 999px; background: var(--ink); color: #fff; text-decoration: none; font-size: 15px; font-weight: 600; min-width: 0; transition: background .15s, transform .15s; }
 .source-pill:hover { background: #2a2a2a; }
 .source-pill:active { transform: scale(.98); }
+.source-pill em { font-style: normal; font-weight: 500; color: rgb(255 255 255 / .55); font-size: 13.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .source-pill span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .source-pill .favicon { width: 16px; height: 16px; border-radius: 4px; background: #fff; flex: none; }
 .source-pill svg { flex: none; }
@@ -309,6 +310,11 @@ kbd.inv { background: rgb(255 255 255 / .14); color: rgb(255 255 255 / .7); }
 .del-btn:hover { color: var(--danger); background: #fdeeed; }
 .del-btn.armed { background: var(--danger); color: #fff; }
 .tbtn.wide { width: auto; padding: 0 10px 0 12px; gap: 6px; display: inline-flex; align-items: center; font-size: 12.5px; font-weight: 600; border-radius: 999px; max-width: 220px; white-space: nowrap; }
+.composer-src { display: flex; align-items: center; gap: 10px; height: 42px; padding: 0 14px; border-radius: 12px; background: var(--soft); color: var(--muted); cursor: text; transition: box-shadow .15s, background .15s; }
+.composer-src:focus-within { background: #fff; box-shadow: 0 0 0 1.5px var(--ink); color: var(--ink); }
+.composer-src.bad { box-shadow: 0 0 0 1.5px var(--danger); }
+.composer-src input { flex: 1; min-width: 0; border: 0; outline: none; background: none; font-size: 14.5px; color: var(--ink); }
+.composer-src svg { width: 16px; height: 16px; flex: none; }
 .files { display: flex; flex-wrap: wrap; gap: 6px; }
 .files .chip { gap: 6px; padding-right: 6px; }
 @media (max-width: 860px) {

@@ -526,7 +526,7 @@ function Detail({ it, onClose, patch, remove, setImage, toast, onPrev, onNext, l
           {link && !editLink ? (
             <>
               <a className="source-pill" href={link} target="_blank" rel="noopener noreferrer" title={link}>
-                <Favicon it={it} size={16} /><span>{link.replace(/^https?:\/\/(www\.)?/, "").replace(/\/$/, "")}</span><Icon.ext />
+                <Favicon it={it} size={16} /><span>Visit original</span><em>{host(link)}</em><Icon.ext />
               </a>
               <button type="button" className="icon-btn sm" aria-label="Edit source link" title="Edit link" onClick={() => setEditLink(true)}><Icon.edit /></button>
             </>
@@ -551,16 +551,22 @@ function Detail({ it, onClose, patch, remove, setImage, toast, onPrev, onNext, l
 /* ---------- composer (bottom dock) ---------- */
 function Composer({ onText, onFile, onClose }) {
   const [v, setV] = useState("");
+  const [src, setSrc] = useState("");
   const [files, setFiles] = useState([]);
   const [type, setType] = useState("");
   const file = useRef(null);
   const text = v.trim();
   const isLink = !!safeUrl(text) && !/\s/.test(text);
-  const canSave = files.length ? !text || isLink : !!text;
+  const srcUrl = safeUrl(src.trim());
+  const srcBad = !!src.trim() && !srcUrl;
+  // The link field is the source; a URL typed in the main box also counts as the source.
+  const source = srcUrl || (isLink ? text : "");
+  const canSave = !srcBad && (files.length ? true : !!text || !!srcUrl);
   const submit = () => {
     if (!canSave) return;
-    if (files.length) files.forEach((f) => onFile(f, type || null, isLink ? text : ""));
-    else onText(text, type || null);
+    if (files.length) files.forEach((f) => onFile(f, type || null, source, isLink ? "" : text));
+    else if (!text || isLink) onText(source, type || null);
+    else onText(text, type || null, srcUrl);
     onClose();
   };
   const addFiles = (list) => setFiles((cur) => [...cur, ...[...list].filter((f) => /^(image|video)\//.test(f.type))]);
@@ -578,15 +584,21 @@ function Composer({ onText, onFile, onClose }) {
         </div>
       )}
       <textarea autoFocus rows={files.length ? 1 : 3} value={v} aria-label={files.length ? "Source link" : "Link or note"}
-        placeholder={files.length ? "Source link, where you found it (optional)" : "Paste a link, write a note, or paste a screenshot…"}
+        placeholder={files.length ? "Add a note (optional)" : "Paste a link, write a note, or paste a screenshot…"}
         onChange={(e) => setV(e.target.value)}
         onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); submit(); } if (e.key === "Escape") { e.stopPropagation(); onClose(); } }} />
+      <label className={"composer-src" + (srcBad ? " bad" : "")}>
+        <Icon.link />
+        <input type="url" inputMode="url" value={src} placeholder="Source link, where you found it" aria-label="Source link"
+          onChange={(e) => setSrc(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); submit(); } if (e.key === "Escape") { e.stopPropagation(); onClose(); } }} />
+      </label>
       <div className="composer-foot">
         <button type="button" className="ghost-btn" onClick={() => file.current.click()}><Icon.image /> Media</button>
         <input ref={file} type="file" hidden multiple accept="image/png,image/jpeg,image/gif,image/webp,image/svg+xml,video/mp4,video/webm"
           onChange={(e) => { addFiles(e.target.files); e.target.value = ""; }} />
         <CategoryPicker value={type} onChange={setType} allowAuto className="in-composer" />
-        <span className="composer-hint">{files.length && text && !isLink ? "Link needs https://" : ""}</span>
+        <span className="composer-hint">{srcBad ? "Link needs https://" : ""}</span>
         <button type="button" className="black-pill sm" disabled={!canSave} onClick={submit}>Save</button>
       </div>
     </motion.div>
@@ -735,13 +747,13 @@ export default function App() {
       : rec.imageId ? { label: "Add source link", run: () => { setLinkFocus(rec.id); setOpenId(rec.id); } } : null);
   }, [reload, toast, clearFilters]);
 
-  const createFromText = useCallback(async (text, forced = null) => {
+  const createFromText = useCallback(async (text, forced = null, srcUrl = "") => {
     const now = new Date().toISOString();
     const u = !/\s/.test(text) && safeUrl(text);
     const type = forced || (u ? detect.fromText({ url: u }) : detect.fromText2(text));
     const rec = u
       ? { id: store.uid(), url: u, title: niceName(u), autoTitle: true, type, autoType: !forced, tags: [], note: "", fav: false, imageId: null, createdAt: now, updatedAt: now }
-      : { id: store.uid(), url: "", title: "", type, autoType: !forced, tags: [], note: text, fav: false, imageId: null, createdAt: now, updatedAt: now };
+      : { id: store.uid(), url: safeUrl(srcUrl), title: "", type, autoType: !forced, tags: [], note: text, fav: false, imageId: null, createdAt: now, updatedAt: now };
     try { await store.putItem(rec); } catch { return toast("Could not save. Browser storage may be full"); }
     await afterCreate(rec);
     if (u) {
@@ -754,15 +766,16 @@ export default function App() {
     }
   }, [afterCreate, patch, toast]);
 
-  const createFromFile = useCallback(async (f, forced = null, src = "") => {
+  const createFromFile = useCallback(async (f, forced = null, src = "", note = "") => {
     if (!f) return;
     if (!/^(image|video)\//.test(f.type)) return toast("That file is not an image or video");
     if (f.size > MAX) return toast("File is over 20 MB. Compress it and try again");
     const now = new Date().toISOString(), imageId = store.uid();
-    const type = forced || (await detect.fromFile(f));
+    let type = forced || (await detect.fromFile(f));
     const url = safeUrl(src);
+    if (!forced && url) { const g = detect.fromText({ url }); if (g !== "Website") type = g; }
     const fname = (f.name || "").replace(/\.[a-z0-9]+$/i, "").replace(/^(image|screenshot.*|untitled)$/i, "");
-    const rec = { id: store.uid(), url, title: fname || niceName(url), type, autoType: !forced, tags: [], note: "", fav: false, imageId, createdAt: now, updatedAt: now };
+    const rec = { id: store.uid(), url, title: fname || niceName(url), type, autoType: !forced, tags: [], note: note.trim(), fav: false, imageId, createdAt: now, updatedAt: now };
     try { await store.putFile(imageId, f); await store.putItem(rec); }
     catch (e) { return toast(e?.name === "QuotaExceededError" ? "Browser storage is full. Export a backup and delete old items" : "Could not save. Try again"); }
     afterCreate(rec);
