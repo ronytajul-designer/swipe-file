@@ -2,24 +2,26 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { AnimatePresence, motion } from "motion/react";
 import * as store from "./store.js";
 import { fetchMeta } from "./meta.js";
+import * as detect from "./detect.js";
 import { gsap, ScrollTrigger, SplitText, lockScroll, reduced, scrollToEl, scrollTop, startLenis } from "./motion.js";
 import { Icon } from "./icons.jsx";
 
-/* Each type is a "place" on the canvas: its own section, color dot and plural label. */
-export const TYPES = ["Website", "Landing page", "UI component", "Animation", "Graphic", "Image", "Typography", "Color", "Copy", "Quote", "Note", "Other"];
+/* Each type is a "place": its own section, color dot and plural label. */
+export const TYPES = ["Website", "Landing page", "Dashboard", "Mobile app", "UI component", "Animation", "Illustration", "Graphic", "Branding", "Typography", "Color", "Image", "Copy", "Quote", "Note", "Other"];
 const META = {
-  "Website": ["Websites", "#4f7cf0"], "Landing page": ["Landing pages", "#f08a4b"], "UI component": ["UI components", "#9273ea"],
-  "Animation": ["Animations", "#ec5f8c"], "Graphic": ["Graphics", "#36b37e"], "Image": ["Images", "#22a6b3"],
-  "Typography": ["Typography", "#c9a227"], "Color": ["Color", "#e5484d"], "Copy": ["Copy", "#9a7b62"],
-  "Quote": ["Quotes", "#6f7fd6"], "Note": ["Notes", "#8a9aa6"], "Other": ["Other", "#b3aea4"],
+  "Website": ["Websites", "#7c9cf0"], "Landing page": ["Landing pages", "#f0a07a"], "Dashboard": ["Dashboards", "#6fb5e8"],
+  "Mobile app": ["Mobile apps", "#8fd0b0"], "UI component": ["UI components", "#b39af0"], "Animation": ["Animations", "#ef8fb0"],
+  "Illustration": ["Illustrations", "#e8b26f"], "Graphic": ["Graphics", "#7cc7a4"], "Branding": ["Branding", "#d68fd0"],
+  "Typography": ["Typography", "#dcc074"], "Color": ["Color", "#ee8a85"], "Image": ["Images", "#7cc3cc"],
+  "Copy": ["Copy", "#c4a68d"], "Quote": ["Quotes", "#9aa5e3"], "Note": ["Notes", "#aab6bf"], "Other": ["Other", "#c4c0b8"],
 };
 const label = (t) => META[t]?.[0] || t;
-const color = (t) => META[t]?.[1] || "#b3aea4";
+const color = (t) => META[t]?.[1] || "#c4c0b8";
 const slug = (t) => "sec-" + t.toLowerCase().replace(/\s+/g, "-");
 
 const MAX = 20 * 1024 * 1024;
 const spring = { type: "spring", stiffness: 420, damping: 38, mass: 0.8 };
-const soft = { type: "spring", stiffness: 260, damping: 32 };
+const soft = { type: "spring", stiffness: 300, damping: 34 };
 const DENSITY = [160, 200, 240, 290, 340];
 
 /* ---------- helpers ---------- */
@@ -36,6 +38,11 @@ function ago(t) {
     if (Math.abs(v) < n) return rtf.format(Math.round(v), u); v /= n;
   }
 }
+const fmtDate = (t) => {
+  if (!t) return "";
+  const d = new Date(t), same = d.getFullYear() === new Date().getFullYear();
+  return d.toLocaleDateString(undefined, same ? { day: "numeric", month: "short" } : { day: "numeric", month: "short", year: "numeric" });
+};
 const kindOf = (it, broken) => {
   if (it.imageId || (it.cover && !broken)) return "media";
   if (it.type === "Quote" || it.type === "Copy") return "quote";
@@ -48,28 +55,56 @@ function useMedia(id) {
   useEffect(() => { let live = true; setM(null); store.fileUrl(id).then((u) => live && setM(u)); return () => { live = false; }; }, [id]);
   return m;
 }
-function useColumns(ref, min, gap = 20, max = 7) {
-  const [n, setN] = useState(4);
+function useSize(ref) {
+  const [s, setS] = useState({ w: 0, h: 0 });
   useLayoutEffect(() => {
     const el = ref.current; if (!el) return;
-    const calc = (w) => setN(Math.max(1, Math.min(max, Math.floor((w + gap) / (min + gap)))));
-    calc(el.clientWidth);
-    const ro = new ResizeObserver(([e]) => calc(e.contentRect.width));
+    setS({ w: el.clientWidth, h: el.clientHeight });
+    const ro = new ResizeObserver(([e]) => setS({ w: e.contentRect.width, h: e.contentRect.height }));
     ro.observe(el); return () => ro.disconnect();
-  }, [ref, min, gap, max]);
-  return n;
+  }, [ref]);
+  return s;
+}
+function useColumns(ref, min, gap = 20, max = 7) {
+  const { w } = useSize(ref);
+  return w ? Math.max(1, Math.min(max, Math.floor((w + gap) / (min + gap)))) : 4;
+}
+async function copyImage(it) {
+  const blob = await store.getFile(it.imageId);
+  if (!blob || !blob.type.startsWith("image/")) throw new Error("no_image");
+  let png = blob;
+  if (blob.type !== "image/png") {
+    const bmp = await createImageBitmap(blob);
+    const c = document.createElement("canvas"); c.width = bmp.width; c.height = bmp.height;
+    c.getContext("2d").drawImage(bmp, 0, 0);
+    png = await new Promise((r) => c.toBlob(r, "image/png"));
+  }
+  await navigator.clipboard.write([new ClipboardItem({ "image/png": png })]);
 }
 
-/* ---------- visuals ---------- */
-function Visual({ it, shared, onBroken, eager }) {
+/* ---------- media in cards: long images crop to the top (hero), video plays in view ---------- */
+function Thumb({ it, onBroken }) {
   const m = useMedia(it.imageId);
+  const [tall, setTall] = useState(false);
+  const vref = useRef(null);
+  useEffect(() => {
+    const v = vref.current; if (!v) return;
+    const io = new IntersectionObserver(([e]) => (e.isIntersecting ? v.play().catch(() => {}) : v.pause()), { threshold: 0.2 });
+    io.observe(v); return () => io.disconnect();
+  }, [m]);
   if (it.imageId && !m) return <div className="skeleton" />;
   const src = m?.src || it.cover;
   if (!src) return null;
-  const p = { layoutId: shared ? "v-" + it.id : undefined, className: "visual", transition: soft };
-  return m?.type?.startsWith("video/")
-    ? <motion.video {...p} src={src} muted loop playsInline autoPlay preload="metadata" />
-    : <motion.img {...p} src={src} alt="" loading={eager ? "eager" : "lazy"} referrerPolicy="no-referrer" onError={onBroken} />;
+  const isVideo = m?.type?.startsWith("video/");
+  return (
+    <div className={"thumb" + (tall ? " tall" : "")}>
+      {isVideo
+        ? <video ref={vref} src={src} muted loop playsInline preload="metadata" onLoadedMetadata={(e) => setTall(e.target.videoHeight / e.target.videoWidth > 1.45)} />
+        : <img src={src} alt="" loading="lazy" referrerPolicy="no-referrer" onError={onBroken} onLoad={(e) => setTall(e.target.naturalHeight / e.target.naturalWidth > 1.45)} />}
+      {tall && <span className="badge">Full page</span>}
+      {isVideo && <span className="badge play">▶ Motion</span>}
+    </div>
+  );
 }
 function Favicon({ it, size = 20 }) {
   const h = host(it.url);
@@ -85,13 +120,13 @@ function Card({ it, onOpen, onFav }) {
   const url = safeUrl(it.url);
   useEffect(() => {
     if (reduced()) return;
-    const tw = gsap.fromTo(inner.current, { y: 36, opacity: 0, rotate: (Math.random() - 0.5) * 3 }, {
-      y: 0, opacity: 1, rotate: 0, duration: 0.9, ease: "power3.out", clearProps: "transform",
+    const tw = gsap.fromTo(inner.current, { y: 36, opacity: 0 }, {
+      y: 0, opacity: 1, duration: 0.9, ease: "power3.out", clearProps: "transform",
       scrollTrigger: { trigger: inner.current, start: "top 96%", once: true },
     });
     return () => { tw.scrollTrigger?.kill(); tw.kill(); };
   }, []);
-  const sub = host(it.url) || ago(it.createdAt);
+  const sub = host(it.url) ? `${host(it.url)} · ${fmtDate(it.createdAt)}` : `Saved ${fmtDate(it.createdAt)}`;
   return (
     <motion.article layout="position" className={"card k-" + kind}
       initial={{ opacity: 0, scale: 0.94 }} animate={{ opacity: 1, scale: 1 }}
@@ -101,7 +136,7 @@ function Card({ it, onOpen, onFav }) {
       <div ref={inner} className="card-in">
         {kind === "media" && (
           <div className="frame">
-            <div className="frame-media"><Visual it={it} shared onBroken={() => setBroken(true)} /></div>
+            <Thumb it={it} onBroken={() => setBroken(true)} />
             {(it.title || sub) && <div className="frame-cap"><b>{it.title || niceName(it.url)}</b><span>{sub}</span></div>}
           </div>
         )}
@@ -114,10 +149,10 @@ function Card({ it, onOpen, onFav }) {
           </div>
         )}
         {kind === "quote" && (
-          <div className="quote"><p>“{it.note || it.title}”</p>{it.note && it.title && <span className="sub">{it.title}</span>}</div>
+          <div className="quote"><p>“{it.note || it.title}”</p><span className="sub">{it.note && it.title ? it.title + " · " : ""}{fmtDate(it.createdAt)}</span></div>
         )}
         {kind === "note" && (
-          <div className="sheet note">{it.title && it.note && <h3>{it.title}</h3>}<p>{it.note || it.title}</p><span className="sub">{ago(it.createdAt)}</span></div>
+          <div className="sheet note">{it.title && it.note && <h3>{it.title}</h3>}<p>{it.note || it.title}</p><span className="sub">{fmtDate(it.createdAt)}</span></div>
         )}
         <div className="card-tools">
           <button type="button" className={"tbtn" + (it.fav ? " on" : "")} aria-label={it.fav ? "Remove from favorites" : "Add to favorites"}
@@ -133,11 +168,7 @@ function Card({ it, onOpen, onFav }) {
 function Masonry({ list, min, onOpen, onFav }) {
   const ref = useRef(null);
   const n = useColumns(ref, min);
-  const cols = useMemo(() => {
-    const c = Array.from({ length: n }, () => []);
-    list.forEach((it, i) => c[i % n].push(it));
-    return c;
-  }, [list, n]);
+  const cols = useMemo(() => { const c = Array.from({ length: n }, () => []); list.forEach((it, i) => c[i % n].push(it)); return c; }, [list, n]);
   useEffect(() => { const t = setTimeout(() => ScrollTrigger.refresh(), 450); return () => clearTimeout(t); }, [list, n]);
   return (
     <div className="grid" ref={ref} style={{ gridTemplateColumns: `repeat(${n}, minmax(0,1fr))` }}>
@@ -152,7 +183,6 @@ function Masonry({ list, min, onOpen, onFav }) {
   );
 }
 
-/* Big italic serif section title, split into characters by GSAP on first view */
 function SectionTitle({ text, count, dot }) {
   const ref = useRef(null);
   useLayoutEffect(() => {
@@ -169,6 +199,45 @@ function SectionTitle({ text, count, dot }) {
       <h2 ref={ref}>{text}</h2>
       <span className="sec-count"><i style={{ background: dot }} />{count} {count === 1 ? "thing" : "things"}</span>
     </div>
+  );
+}
+
+function RailRow({ open, k, text, dot, on, onClick, ring, dashed }) {
+  return (
+    <button type="button" className={"rail-item" + (on ? " on" : "")} onClick={onClick} aria-label={typeof text === "string" ? text : k} aria-current={on || undefined}>
+      <span className={"rail-dot" + (ring ? " ring" : "") + (dashed ? " dashed" : "")} style={{ "--dot": dot }} />
+      <AnimatePresence>
+        {open && (
+          <motion.span className="rail-label" initial={{ opacity: 0, x: -6 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -4, transition: { duration: 0.1 } }} transition={{ duration: 0.18, delay: 0.04 }}>
+            {text}
+          </motion.span>
+        )}
+      </AnimatePresence>
+    </button>
+  );
+}
+
+/* ---------- rail: collapsed dots, expands on hover (Knowspace-style) ---------- */
+function Rail({ view, groups, active, onPick, onRandom, onSettings }) {
+  const [open, setOpen] = useState(false);
+  const t = useRef(null);
+  const enter = () => { clearTimeout(t.current); setOpen(true); };
+  const leave = () => { clearTimeout(t.current); t.current = setTimeout(() => setOpen(false), 120); };
+  return (
+    <motion.nav className={"rail" + (open ? " open" : "")} aria-label="Browse"
+      onMouseEnter={enter} onMouseLeave={leave} onFocus={enter} onBlur={leave}
+      animate={{ width: open ? 212 : 44 }} transition={soft}>
+      <RailRow open={open} k="all" text="Everything" dot="linear-gradient(#7c9cf0,#b39af0)" on={view === "places" && !active} onClick={() => onPick("all")} />
+      <RailRow open={open} k="latest" text="Latest" dot="#111" on={view === "latest"} onClick={() => onPick("latest")} />
+      <RailRow open={open} k="fav" text="Favorites" dot="var(--accent)" on={view === "fav"} onClick={() => onPick("fav")} />
+      {!!groups.length && <span className="rail-sep" />}
+      {groups.map(([type, l]) => (
+        <RailRow open={open} key={type} k={label(type)} text={<>{label(type)}<em>{l.length}</em></>} dot={color(type)} on={view === "places" && active === type} onClick={() => onPick(type)} />
+      ))}
+      <RailRow open={open} k="random" text="Random" ring onClick={onRandom} />
+      <span className="rail-sep" />
+      <RailRow open={open} k="settings" text="Backup and settings" dashed onClick={onSettings} />
+    </motion.nav>
   );
 }
 
@@ -194,10 +263,10 @@ function Modal({ open, onClose, children, label: aria, className = "" }) {
   return (
     <AnimatePresence>
       {open && (
-        <motion.div key="overlay" className="overlay" onClick={onClose} initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0, transition: { duration: 0.22 } }}>
+        <motion.div key="overlay" className="overlay" onClick={onClose} initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0, transition: { duration: 0.2 } }}>
           <motion.div ref={ref} tabIndex={-1} className={"modal " + className} role="dialog" aria-modal="true" aria-label={aria}
             onClick={(e) => e.stopPropagation()}
-            initial={{ opacity: 0, y: 40, scale: 0.97 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: 24, scale: 0.98, transition: { duration: 0.18 } }}
+            initial={{ opacity: 0, y: 28, scale: 0.985 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: 16, scale: 0.99, transition: { duration: 0.16 } }}
             transition={soft}>
             {children}
           </motion.div>
@@ -206,10 +275,6 @@ function Modal({ open, onClose, children, label: aria, className = "" }) {
     </AnimatePresence>
   );
 }
-const Rise = ({ children, className, as = "div", ...rest }) => {
-  const C = motion[as];
-  return <C className={className} variants={{ hide: { opacity: 0, y: 12 }, show: { opacity: 1, y: 0, transition: spring } }} {...rest}>{children}</C>;
-};
 
 function useAutosave(value, save, delay = 500) {
   const last = useRef(value), latest = useRef(value), saveRef = useRef(save);
@@ -222,29 +287,188 @@ function useAutosave(value, save, delay = 500) {
   useEffect(() => () => { if (latest.current !== last.current) saveRef.current(latest.current); }, []);
 }
 
-/* ---------- detail: reading-card layout, everything editable in place ---------- */
+/* ---------- stage: live site, scrollable full image, playing video ---------- */
+function LiveFrame({ url, device }) {
+  const box = useRef(null);
+  const { w, h } = useSize(box);
+  const [loaded, setLoaded] = useState(false);
+  const [hint, setHint] = useState(false);
+  useEffect(() => { setLoaded(false); setHint(false); const t = setTimeout(() => setHint(true), 3500); return () => clearTimeout(t); }, [url, device]);
+  const mobile = device === "mobile";
+  const vw = mobile ? 390 : 1440, vh = mobile ? 844 : 0;
+  const scale = !w || !h ? 1 : mobile ? Math.min(1, (h - 8) / vh) : Math.min(1, w / vw);
+  const frameH = mobile ? vh : Math.ceil(h / scale);
+  return (
+    <div className={"live" + (mobile ? " mobile" : "")} ref={box}>
+      {!!w && (
+        <div className="live-shell" style={{ width: vw * scale, height: frameH * scale }}>
+          <iframe key={url + device} src={url} title="Live preview" loading="lazy" onLoad={() => setLoaded(true)}
+            sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox"
+            referrerPolicy="no-referrer-when-downgrade"
+            style={{ width: vw, height: frameH, transform: `scale(${scale})` }} />
+          {!loaded && <div className="live-loading"><span className="spinner" />Loading live site…</div>}
+        </div>
+      )}
+      <AnimatePresence>
+        {hint && (
+          <motion.div className="live-hint" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}>
+            Blank? Some sites block previews inside other pages.
+            <a href={url} target="_blank" rel="noopener noreferrer">Open site <Icon.ext /></a>
+            <button type="button" aria-label="Dismiss" onClick={() => setHint(false)}><Icon.x /></button>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+}
+
+function MediaStage({ it, onDims, onBroken }) {
+  const m = useMedia(it.imageId);
+  if (it.imageId && !m) return <div className="stage-center"><div className="skeleton big" /></div>;
+  const src = m?.src || it.cover;
+  if (m?.type?.startsWith("video/")) {
+    return (
+      <div className="stage-center">
+        <video className="stage-video" src={src} autoPlay loop muted playsInline controls
+          onLoadedMetadata={(e) => onDims({ w: e.target.videoWidth, h: e.target.videoHeight, video: true })} />
+      </div>
+    );
+  }
+  return <StageImage src={src} onDims={onDims} onBroken={onBroken} />;
+}
+function StageImage({ src, onDims, onBroken }) {
+  const [tall, setTall] = useState(false);
+  return (
+    <div className={tall ? "stage-scroll" : "stage-center fit"} data-lenis-prevent>
+      <img className="stage-img" src={src} alt="" referrerPolicy="no-referrer" onError={onBroken}
+        onLoad={(e) => { const w = e.target.naturalWidth, h = e.target.naturalHeight; setTall(h / w > 1.2); onDims({ w, h }); }} />
+    </div>
+  );
+}
+
+/* ---------- detail (Mobbin-clean: header, stage, footer; everything else behind More info) ---------- */
 function Detail({ it, onClose, patch, remove, setImage, toast, allTags, onPrev, onNext, onTag }) {
+  const [broken, setBroken] = useState(false);
+  const kind = kindOf(it, broken);
+  const link = safeUrl(it.url);
+  const canLive = link.startsWith("https:");
+  const hasMedia = kind === "media";
+  const [mode, setMode] = useState(canLive ? "live" : "media");
+  const [device, setDevice] = useState("desktop");
+  const [dims, setDims] = useState(null);
+  const [info, setInfo] = useState(false);
+  const [menu, setMenu] = useState(false);
+  const [armed, setArmed] = useState(false);
+  const [over, setOver] = useState(false);
+  const file = useRef(null);
+  useEffect(() => { if (!armed) return; const t = setTimeout(() => setArmed(false), 3000); return () => clearTimeout(t); }, [armed]);
+  const showLive = canLive && (mode === "live" || !hasMedia);
+
+  const copy = async () => {
+    if (it.imageId && !dims?.video) {
+      try { await copyImage(it); return toast("Image copied"); } catch {}
+    }
+    if (link) return navigator.clipboard?.writeText(link).then(() => toast("Link copied"), () => toast("Copy failed"));
+    if (it.note) return navigator.clipboard?.writeText(it.note).then(() => toast("Text copied"), () => toast("Copy failed"));
+  };
+  const dimLabel = dims ? `${dims.video ? "Video" : dims.h / dims.w > 1.45 ? "Full page" : dims.w < 600 ? "Mobile" : "Desktop"} (${dims.w}×${dims.h})` : showLive ? (device === "mobile" ? "Live · Mobile 390" : "Live · Desktop 1440") : "";
+
+  return (
+    <div className="dv" onDragOver={(e) => { e.preventDefault(); setOver(true); }} onDragLeave={(e) => e.currentTarget === e.target && setOver(false)}
+      onDrop={(e) => { e.preventDefault(); setOver(false); setImage(it, e.dataTransfer.files[0]); }}>
+      <header className="dv-head">
+        <div className="dv-id">
+          <span className="dv-logo" style={{ "--dot": color(it.type) }}>{link ? <Favicon it={it} size={22} /> : <i />}</span>
+          <b>{it.title || niceName(it.url) || (kind === "note" ? "Note" : "Untitled")}</b>
+        </div>
+        {canLive && hasMedia && (
+          <div className="seg" role="tablist" aria-label="Preview mode">
+            {[["live", "Live site"], ["media", "Screenshot"]].map(([k, l]) => (
+              <button key={k} type="button" role="tab" aria-selected={mode === k} className={mode === k ? "on" : ""} onClick={() => setMode(k)}>
+                {mode === k && <motion.i layoutId="segbg" className="seg-bg" transition={spring} />}<span>{l}</span>
+              </button>
+            ))}
+          </div>
+        )}
+        <div className="dv-tools">
+          {showLive && (
+            <div className="seg sm" role="tablist" aria-label="Device">
+              {[["desktop", "Desktop"], ["mobile", "Mobile"]].map(([k, l]) => (
+                <button key={k} type="button" role="tab" aria-selected={device === k} className={device === k ? "on" : ""} onClick={() => setDevice(k)}>
+                  {device === k && <motion.i layoutId="devbg" className="seg-bg" transition={spring} />}<span>{l}</span>
+                </button>
+              ))}
+            </div>
+          )}
+          {link && <button type="button" className="icon-btn" title="Copy link" aria-label="Copy link" onClick={() => navigator.clipboard?.writeText(link).then(() => toast("Link copied"))}><Icon.link /></button>}
+          <span className="vsep" />
+          <button type="button" className="icon-btn" onClick={onClose} aria-label="Close" data-autofocus><Icon.x /></button>
+        </div>
+      </header>
+
+      <div className={"dv-stage" + (over ? " over" : "")}>
+        {showLive ? <LiveFrame url={link} device={device} />
+          : hasMedia ? <MediaStage it={it} onDims={setDims} onBroken={() => setBroken(true)} />
+          : kind === "quote" ? <div className="stage-center"><p className="stage-quote">“{it.note || it.title}”</p></div>
+          : kind === "note" ? <div className="stage-center"><p className="stage-note">{it.note || it.title}</p></div>
+          : <div className="stage-center"><div className="stage-empty"><Favicon it={it} size={40} /><b>{it.title || niceName(it.url)}</b><span>Live preview needs an https link. Drop or paste a screenshot to add one.</span></div></div>}
+        <button type="button" className="arrow prev" onClick={onPrev} aria-label="Previous"><Icon.left /></button>
+        <button type="button" className="arrow next" onClick={onNext} aria-label="Next"><Icon.right /></button>
+
+        <AnimatePresence>
+          {info && <InfoPanel key="info" it={it} patch={patch} toast={toast} allTags={allTags} onTag={onTag} onClose={() => setInfo(false)} />}
+        </AnimatePresence>
+      </div>
+
+      <footer className="dv-foot">
+        <div className="dv-found">
+          <span>Found in</span>
+          <label className="found-chip"><i style={{ background: color(it.type) }} />
+            <select value={it.type} aria-label="Type" onChange={(e) => patch(it.id, { type: e.target.value, autoType: false })}>{TYPES.map((t) => <option key={t}>{t}</option>)}</select>
+          </label>
+        </div>
+        <div className="dv-actions">
+          {link ? <a className="black-pill" href={link} target="_blank" rel="noopener noreferrer">Open site</a>
+            : <button type="button" className={"black-pill" + (it.fav ? " faved" : "")} onClick={() => patch(it.id, (cur) => ({ fav: !cur.fav }))}>{it.fav ? "Saved" : "Save"}</button>}
+          <button type="button" className="soft-pill" onClick={copy}>Copy</button>
+          <div className="menu-wrap">
+            <button type="button" className="soft-pill round-pill" aria-label="More actions" aria-expanded={menu} onClick={() => setMenu((v) => !v)}><Icon.dots /></button>
+            <AnimatePresence>
+              {menu && (
+                <motion.div className="menu" initial={{ opacity: 0, y: 6, scale: 0.97 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: 4 }} transition={{ duration: 0.14 }}
+                  onMouseLeave={() => setMenu(false)}>
+                  <button type="button" onClick={() => { patch(it.id, (cur) => ({ fav: !cur.fav })); setMenu(false); }}>{it.fav ? <Icon.bookmarkFill /> : <Icon.bookmark />}{it.fav ? "Remove favorite" : "Add to favorites"}</button>
+                  <button type="button" onClick={() => { file.current.click(); setMenu(false); }}><Icon.image />{it.imageId || it.cover ? "Replace image" : "Add screenshot"}</button>
+                  <button type="button" onClick={() => { setInfo(true); setMenu(false); }}><Icon.edit />Edit details</button>
+                  <button type="button" className={"danger" + (armed ? " armed" : "")} onClick={() => (armed ? remove(it) : setArmed(true))}><Icon.trash />{armed ? "Click again to delete" : "Delete"}</button>
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
+          <input ref={file} type="file" hidden accept="image/png,image/jpeg,image/gif,image/webp,image/svg+xml,video/mp4,video/webm" onChange={(e) => { setImage(it, e.target.files[0]); e.target.value = ""; }} />
+        </div>
+        <div className="dv-meta">
+          <span>{dimLabel}</span>
+          <span className="dv-date">Saved {fmtDate(it.createdAt)}{it.autoType ? " · auto-sorted" : ""}</span>
+          <button type="button" className={"more" + (info ? " on" : "")} onClick={() => setInfo((v) => !v)} aria-expanded={info}>{info ? "Hide info" : "More info"}</button>
+        </div>
+      </footer>
+    </div>
+  );
+}
+
+function InfoPanel({ it, patch, toast, allTags, onTag, onClose }) {
   const [title, setTitle] = useState(it.title || "");
   const [note, setNote] = useState(it.note || "");
   const [url, setUrl] = useState(it.url || "");
-  const [adding, setAdding] = useState(false);
-  const [tagDraft, setTagDraft] = useState("");
-  const [armed, setArmed] = useState(false);
-  const [broken, setBroken] = useState(false);
-  const [over, setOver] = useState(false);
-  const file = useRef(null);
-  const kind = kindOf(it, broken);
-  const link = safeUrl(it.url);
-  const tags = it.tags || [];
-
+  const [draft, setDraft] = useState("");
   useAutosave(title, (v) => patch(it.id, { title: v.trim(), autoTitle: false }));
   useAutosave(note, (v) => patch(it.id, { note: v.trim() }));
-  useEffect(() => { if (!armed) return; const t = setTimeout(() => setArmed(false), 3000); return () => clearTimeout(t); }, [armed]);
-
+  const tags = it.tags || [];
   const addTag = (raw) => {
     const t = raw.trim().toLowerCase().replace(/^#/, "");
     if (t) patch(it.id, (cur) => ({ tags: (cur.tags || []).includes(t) ? cur.tags : [...(cur.tags || []), t] }));
-    setTagDraft("");
+    setDraft("");
   };
   const commitUrl = () => {
     const u = url.trim();
@@ -252,109 +476,39 @@ function Detail({ it, onClose, patch, remove, setImage, toast, allTags, onPrev, 
     if (u && !safeUrl(u)) { toast("Link needs to start with https://"); setUrl(it.url || ""); return; }
     patch(it.id, { url: u });
   };
-  const sugg = allTags.filter((t) => !tags.includes(t) && (!tagDraft || t.includes(tagDraft.toLowerCase()))).slice(0, 8);
-  const drop = {
-    onDragOver: (e) => { e.preventDefault(); setOver(true); },
-    onDragLeave: () => setOver(false),
-    onDrop: (e) => { e.preventDefault(); setOver(false); setImage(it, e.dataTransfer.files[0]); },
-  };
-
+  const sugg = allTags.filter((t) => !tags.includes(t) && (!draft || t.includes(draft.toLowerCase()))).slice(0, 6);
   return (
-    <>
-      <button type="button" className="round side-nav prev" onClick={onPrev} aria-label="Previous"><Icon.left /></button>
-      <button type="button" className="round side-nav next" onClick={onNext} aria-label="Next"><Icon.right /></button>
-      <button className="round close" type="button" onClick={onClose} aria-label="Close"><Icon.x /></button>
-      <div className="d-scroll" data-lenis-prevent>
-        {kind === "media" ? (
-          <div className={"hero" + (over ? " over" : "")} {...drop}><Visual it={it} shared eager onBroken={() => setBroken(true)} /></div>
-        ) : (
-          <div className={"hero empty-hero" + (over ? " over" : "")} style={{ "--dot": color(it.type) }} {...drop}>
-            {kind === "quote" ? <p className="hero-quote">“{it.note || it.title}”</p> : <span className="hero-hint"><Icon.image /> Drop or paste an image to add a cover</span>}
-          </div>
-        )}
-
-        <motion.div className="d-body" initial="hide" animate="show" variants={{ show: { transition: { staggerChildren: 0.05, delayChildren: 0.1 } } }}>
-          <Rise className="d-meta">
-            <span className="meta-type"><i style={{ background: color(it.type) }} />
-              <select value={it.type} aria-label="Type" onChange={(e) => patch(it.id, { type: e.target.value })}>
-                {TYPES.map((t) => <option key={t}>{t}</option>)}
-              </select>
-            </span>
-            {link && <a href={link} target="_blank" rel="noopener noreferrer"><Favicon it={it} size={14} />{host(link)}</a>}
-            <span>Saved {ago(it.createdAt)}</span>
-          </Rise>
-
-          <Rise>
-            <textarea className="d-title" rows={1} value={title} placeholder="Untitled" aria-label="Title"
-              onChange={(e) => setTitle(e.target.value)} onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), e.target.blur())} />
-          </Rise>
-
-          {it.desc && <Rise as="p" className="d-lede">{it.desc}</Rise>}
-
-          <Rise className="callout">
-            <label htmlFor="d-note" className="callout-l">{kind === "quote" ? "Quote" : kind === "note" ? "Note" : "Why I saved it"}</label>
-            <textarea id="d-note" rows={3} value={note} placeholder="What would you steal from this? The layout, the motion, a phrase…" onChange={(e) => setNote(e.target.value)} />
-          </Rise>
-
-          <Rise className="d-sect">
-            <div className="d-label">Tags</div>
-            <div className="tags">
-              <AnimatePresence initial={false}>
-                {tags.map((t) => (
-                  <motion.span layout key={t} className="chip" initial={{ opacity: 0, scale: 0.8 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.8 }} transition={spring}>
-                    <button type="button" className="chip-jump" onClick={() => onTag(t)}>#{t}</button>
-                    <button type="button" className="chip-x" aria-label={"Remove tag " + t} onClick={() => patch(it.id, (cur) => ({ tags: (cur.tags || []).filter((x) => x !== t) }))}><Icon.x /></button>
-                  </motion.span>
-                ))}
-              </AnimatePresence>
-              {adding ? (
-                <input className="tag-in" autoFocus value={tagDraft} placeholder="Type a tag, Enter" aria-label="New tag"
-                  onChange={(e) => setTagDraft(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" || e.key === ",") { e.preventDefault(); addTag(tagDraft); }
-                    if (e.key === "Escape") { e.stopPropagation(); setAdding(false); setTagDraft(""); }
-                    if (e.key === "Backspace" && !tagDraft && tags.length) patch(it.id, (cur) => ({ tags: (cur.tags || []).slice(0, -1) }));
-                  }}
-                  onBlur={() => { if (tagDraft) addTag(tagDraft); setAdding(false); }} />
-              ) : (
-                <button type="button" className="chip add" onClick={() => setAdding(true)}><Icon.plus /> Add tag</button>
-              )}
-            </div>
-            {adding && !!sugg.length && (
-              <div className="sugg">{sugg.map((t) => <button key={t} type="button" className="chip faint" onMouseDown={(e) => { e.preventDefault(); addTag(t); }}>#{t}</button>)}</div>
-            )}
-          </Rise>
-
-          <Rise className="d-sect">
-            <label className="d-label" htmlFor="d-url">Link</label>
-            <input id="d-url" className="d-url" type="url" inputMode="url" placeholder="https://" value={url}
-              onChange={(e) => setUrl(e.target.value)} onBlur={commitUrl} onKeyDown={(e) => e.key === "Enter" && e.target.blur()} />
-          </Rise>
-        </motion.div>
+    <motion.aside className="info" data-lenis-prevent initial={{ x: 24, opacity: 0 }} animate={{ x: 0, opacity: 1 }} exit={{ x: 24, opacity: 0, transition: { duration: 0.15 } }} transition={soft}>
+      <div className="info-head"><span>Details</span><button type="button" className="icon-btn sm" onClick={onClose} aria-label="Close details"><Icon.x /></button></div>
+      <label className="f"><span>Title</span><input value={title} placeholder="Untitled" onChange={(e) => setTitle(e.target.value)} /></label>
+      {it.desc && <p className="info-desc">{it.desc}</p>}
+      <label className="f"><span className="accent">Why I saved it</span><textarea rows={4} value={note} placeholder="What would you steal from this?" onChange={(e) => setNote(e.target.value)} /></label>
+      <div className="f"><span>Tags</span>
+        <div className="tags">
+          {tags.map((t) => (
+            <span key={t} className="chip"><button type="button" className="chip-jump" onClick={() => onTag(t)}>#{t}</button>
+              <button type="button" className="chip-x" aria-label={"Remove tag " + t} onClick={() => patch(it.id, (cur) => ({ tags: (cur.tags || []).filter((x) => x !== t) }))}><Icon.x /></button></span>
+          ))}
+          <input className="tag-in" value={draft} placeholder="Add tag, Enter" aria-label="New tag" onChange={(e) => setDraft(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" || e.key === ",") { e.preventDefault(); addTag(draft); }
+              if (e.key === "Backspace" && !draft && tags.length) patch(it.id, (cur) => ({ tags: (cur.tags || []).slice(0, -1) }));
+            }} onBlur={() => draft && addTag(draft)} />
+        </div>
+        {!!sugg.length && <div className="sugg">{sugg.map((t) => <button key={t} type="button" className="chip faint" onMouseDown={(e) => { e.preventDefault(); addTag(t); }}>#{t}</button>)}</div>}
       </div>
-
-      <div className="d-foot">
-        <button type="button" className={"ghost-btn" + (it.fav ? " on" : "")} onClick={() => patch(it.id, (cur) => ({ fav: !cur.fav }))}>
-          {it.fav ? <Icon.bookmarkFill /> : <Icon.bookmark />} {it.fav ? "Favorited" : "Favorite"}
-        </button>
-        {link && <button type="button" className="ghost-btn hide-sm" onClick={() => navigator.clipboard?.writeText(link).then(() => toast("Link copied"), () => toast("Copy failed. Select the link and copy it"))}><Icon.share /> Copy link</button>}
-        <button type="button" className="ghost-btn icon-only" title={it.imageId || it.cover ? "Replace image" : "Add image"} aria-label="Add or replace image" onClick={() => file.current.click()}><Icon.image /></button>
-        <input ref={file} type="file" hidden accept="image/png,image/jpeg,image/gif,image/webp,image/svg+xml,video/mp4,video/webm" onChange={(e) => { setImage(it, e.target.files[0]); e.target.value = ""; }} />
-        <button type="button" className={"ghost-btn icon-only danger" + (armed ? " armed" : "")} aria-label={armed ? "Click again to delete" : "Delete"} title="Delete"
-          onClick={() => (armed ? remove(it) : setArmed(true))}><Icon.trash />{armed && <span>Click again</span>}</button>
-        {link
-          ? <a className="black-pill" href={link} target="_blank" rel="noopener noreferrer">Open site <Icon.ext /></a>
-          : <button type="button" className="black-pill" onClick={onClose}>Done</button>}
-      </div>
-    </>
+      <label className="f"><span>Link</span><input className="mono" type="url" inputMode="url" placeholder="https://" value={url} onChange={(e) => setUrl(e.target.value)} onBlur={commitUrl} onKeyDown={(e) => e.key === "Enter" && e.target.blur()} /></label>
+      <p className="info-foot">Saved {ago(it.createdAt)}{it.updatedAt && it.updatedAt !== it.createdAt ? ` · edited ${ago(it.updatedAt)}` : ""}</p>
+    </motion.aside>
   );
 }
 
 /* ---------- composer (bottom dock) ---------- */
 function Composer({ onText, onFile, onClose }) {
   const [v, setV] = useState("");
+  const [type, setType] = useState("");
   const file = useRef(null);
-  const submit = () => { const t = v.trim(); if (!t) return; onText(t); setV(""); onClose(); };
+  const submit = () => { const t = v.trim(); if (!t) return; onText(t, type || null); setV(""); onClose(); };
   const isLink = !!safeUrl(v.trim()) && !/\s/.test(v.trim());
   return (
     <motion.div className="composer" role="dialog" aria-label="Save something"
@@ -363,10 +517,17 @@ function Composer({ onText, onFile, onClose }) {
         onChange={(e) => setV(e.target.value)}
         onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); submit(); } if (e.key === "Escape") { e.stopPropagation(); onClose(); } }} />
       <div className="composer-foot">
-        <button type="button" className="ghost-btn" onClick={() => file.current.click()}><Icon.image /> Image</button>
+        <button type="button" className="ghost-btn" onClick={() => file.current.click()}><Icon.image /> Image or video</button>
         <input ref={file} type="file" hidden multiple accept="image/png,image/jpeg,image/gif,image/webp,image/svg+xml,video/mp4,video/webm"
-          onChange={(e) => { [...e.target.files].forEach(onFile); e.target.value = ""; onClose(); }} />
-        <span className="composer-hint">{v.trim() ? (isLink ? "Saves as a link" : "Saves as a note") : "Tip: paste a link or screenshot anywhere"}</span>
+          onChange={(e) => { [...e.target.files].forEach((f) => onFile(f, type || null)); e.target.value = ""; onClose(); }} />
+        <label className="type-select">
+          <i style={{ background: type ? color(type) : "linear-gradient(#7c9cf0,#ef8fb0)" }} />
+          <select value={type} onChange={(e) => setType(e.target.value)} aria-label="Category">
+            <option value="">Auto-detect</option>
+            {TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
+          </select>
+        </label>
+        <span className="composer-hint">{v.trim() ? (isLink ? "Saves as a link" : "Saves as a note") : ""}</span>
         <button type="button" className="black-pill sm" disabled={!v.trim()} onClick={submit}>Save</button>
       </div>
     </motion.div>
@@ -400,41 +561,20 @@ function Backup({ onClose, count, reload, toast }) {
   }
   return (
     <div className="backup">
-      <button className="round close" type="button" onClick={onClose} aria-label="Close"><Icon.x /></button>
-      <div className="d-meta"><span className="meta-type"><i style={{ background: "var(--accent)" }} />Your library</span></div>
-      <h2 className="d-title static">Backup and move</h2>
-      <p className="d-lede">Everything lives in this browser only. Export a backup regularly, and import it on another device to move your library. Import merges and never deletes.</p>
+      <button className="icon-btn close-abs" type="button" onClick={onClose} aria-label="Close"><Icon.x /></button>
+      <h2>Backup and move</h2>
+      <p>Everything lives in this browser only. Export a backup now and then, and import it on another device to move your library. Import merges and never deletes.</p>
       <dl className="meta">
         <dt>References</dt><dd>{count}</dd>
         {u && <><dt>Storage used</dt><dd>{fmtBytes(u.used)} of {fmtBytes(u.quota)}</dd></>}
       </dl>
       <div className="row">
         <button className="black-pill" type="button" data-autofocus disabled={busy || !count} onClick={doExport}><Icon.download /> Export backup</button>
-        <button className="white-pill" type="button" disabled={busy} onClick={() => file.current.click()}>Import backup</button>
+        <button className="soft-pill" type="button" disabled={busy} onClick={() => file.current.click()}>Import backup</button>
         <input ref={file} type="file" accept="application/json,.json" hidden onChange={(e) => { doImport(e.target.files[0]); e.target.value = ""; }} />
       </div>
     </div>
   );
-}
-
-/* ---------- small bits ---------- */
-function WeekRing({ n, goal = 10 }) {
-  const p = Math.min(1, n / goal), r = 8, c = 2 * Math.PI * r;
-  return (
-    <span className="white-pill static week" title="Saved in the last 7 days">
-      <svg width="20" height="20" viewBox="0 0 20 20" aria-hidden>
-        <circle cx="10" cy="10" r={r} fill="none" stroke="var(--line)" strokeWidth="2" />
-        <motion.circle cx="10" cy="10" r={r} fill="none" stroke="var(--accent)" strokeWidth="2" strokeLinecap="round" transform="rotate(-90 10 10)"
-          strokeDasharray={c} initial={{ strokeDashoffset: c }} animate={{ strokeDashoffset: c * (1 - p) }} transition={{ duration: 1.2, ease: [0.2, 0.7, 0.2, 1] }} />
-      </svg>
-      <b>{n}</b>&nbsp;of {goal} this week
-    </span>
-  );
-}
-function Thumb({ it }) {
-  const m = useMedia(it.imageId);
-  const src = m?.src || it.cover;
-  return <span className="rthumb" style={{ "--dot": color(it.type) }}>{src && !m?.type?.startsWith("video/") ? <img src={src} alt="" referrerPolicy="no-referrer" /> : null}</span>;
 }
 
 /* ---------- app ---------- */
@@ -447,11 +587,12 @@ export default function App() {
   const [q, setQ] = useState("");
   const [qLive, setQLive] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
-  const [density, setDensity] = useState(() => { try { const v = Number(localStorage.getItem("sf-density")); return v >= 0 && v < DENSITY.length && localStorage.getItem("sf-density") !== null ? v : 2; } catch { return 2; } });
+  const [density, setDensity] = useState(() => { try { const s = localStorage.getItem("sf-density"); const v = Number(s); return s !== null && v >= 0 && v < DENSITY.length ? v : 2; } catch { return 2; } });
   const [openId, setOpenId] = useState(null);
   const [backup, setBackup] = useState(false);
   const [composer, setComposer] = useState(false);
   const [active, setActive] = useState(null);
+  const [pendingJump, setPendingJump] = useState(null);
   const [msg, setMsg] = useState(null);
   const rootRef = useRef(null);
   const searchRef = useRef(null);
@@ -471,9 +612,9 @@ export default function App() {
   useLayoutEffect(() => {
     if (reduced()) return;
     const ctx = gsap.context(() => {
-      gsap.from(".topbar > *", { y: -18, opacity: 0, duration: 0.8, ease: "power3.out", stagger: 0.07 });
-      gsap.from(".dock > *, .corner > *", { y: 24, opacity: 0, duration: 0.8, ease: "power3.out", stagger: 0.06, delay: 0.2 });
-      gsap.from(".hello > *", { y: 20, opacity: 0, duration: 1, ease: "expo.out", stagger: 0.08, delay: 0.1 });
+      // Fade only on fixed chrome: transforms here fight the pills' own CSS hover transitions and can stick off-position.
+      gsap.from(".topbar > *, .dock, .corner", { autoAlpha: 0, duration: 0.7, ease: "power2.out", stagger: 0.06, clearProps: "opacity,visibility" });
+      gsap.from(".hello > *", { y: 20, opacity: 0, duration: 1, ease: "expo.out", stagger: 0.08, delay: 0.1, clearProps: "transform,opacity" });
     }, rootRef);
     return () => ctx.revert();
   }, []);
@@ -491,25 +632,39 @@ export default function App() {
   }, [items, q, tags, view]);
 
   const groups = useMemo(() => TYPES.map((t) => [t, filtered.filter((i) => i.type === t)]).filter(([, l]) => l.length), [filtered]);
+  const allGroups = useMemo(() => TYPES.map((t) => [t, items.filter((i) => i.type === t)]).filter(([, l]) => l.length), [items]);
   const tagList = useMemo(() => {
     const c = {}; items.forEach((i) => (i.tags || []).forEach((t) => (c[t] = (c[t] || 0) + 1)));
     return Object.keys(c).sort((a, b) => c[b] - c[a] || a.localeCompare(b));
   }, [items]);
-  const week = useMemo(() => items.filter((i) => Date.now() - new Date(i.createdAt) < 7 * 864e5).length, [items]);
   const filtersOn = tags.size > 0 || !!q;
   const flatList = view === "places" ? groups.flatMap(([, l]) => l) : filtered;
   const clearFilters = useCallback(() => { setTags(new Set()); setQ(""); setQLive(""); }, []);
   const toggleTag = (t) => setTags((s) => { const n = new Set(s); n.has(t) ? n.delete(t) : n.add(t); return n; });
 
-  /* scroll spy for the rail */
+  /* scroll spy */
   useEffect(() => {
     if (view !== "places") return;
     const els = groups.map(([t]) => document.getElementById(slug(t))).filter(Boolean);
     if (!els.length) return;
     const io = new IntersectionObserver((es) => es.forEach((e) => e.isIntersecting && setActive(e.target.dataset.type)), { rootMargin: "-35% 0px -60% 0px" });
     els.forEach((el) => io.observe(el));
-    return () => io.disconnect();
+    const onTop = () => window.scrollY < 200 && setActive(null);
+    window.addEventListener("scroll", onTop, { passive: true });
+    return () => { io.disconnect(); window.removeEventListener("scroll", onTop); };
   }, [groups, view]);
+  useEffect(() => {
+    if (!pendingJump || view !== "places") return;
+    const t = setTimeout(() => { scrollToEl(document.getElementById(slug(pendingJump))); setPendingJump(null); }, 60);
+    return () => clearTimeout(t);
+  }, [pendingJump, view, groups]);
+
+  const pick = (k) => {
+    if (k === "latest" || k === "fav") { setView(k); scrollTop(); return; }
+    if (k === "all") { setView("places"); setActive(null); scrollTop(); return; }
+    if (!groups.some(([t]) => t === k)) clearFilters();
+    setView("places"); setPendingJump(k);
+  };
 
   /* --- data actions --- */
   const patch = useCallback(async (id, fields) => { try { await store.patchItem(id, fields); await reload(); } catch { toast("Could not save. Try again"); } }, [reload, toast]);
@@ -517,30 +672,35 @@ export default function App() {
     await reload();
     clearFilters();
     setView((v) => (v === "fav" ? "places" : v));
-    toast("Saved to " + label(rec.type), { label: "Add tags", run: () => setOpenId(rec.id) });
+    toast("Saved to " + label(rec.type), { label: "Open", run: () => setOpenId(rec.id) });
   }, [reload, toast, clearFilters]);
 
-  const createFromText = useCallback(async (text) => {
+  const createFromText = useCallback(async (text, forced = null) => {
     const now = new Date().toISOString();
     const u = !/\s/.test(text) && safeUrl(text);
+    const type = forced || (u ? detect.fromText({ url: u }) : detect.fromText2(text));
     const rec = u
-      ? { id: store.uid(), url: u, title: niceName(u), autoTitle: true, type: "Website", tags: [], note: "", fav: false, imageId: null, createdAt: now, updatedAt: now }
-      : { id: store.uid(), url: "", title: "", type: "Note", tags: [], note: text, fav: false, imageId: null, createdAt: now, updatedAt: now };
+      ? { id: store.uid(), url: u, title: niceName(u), autoTitle: true, type, autoType: !forced, tags: [], note: "", fav: false, imageId: null, createdAt: now, updatedAt: now }
+      : { id: store.uid(), url: "", title: "", type, autoType: !forced, tags: [], note: text, fav: false, imageId: null, createdAt: now, updatedAt: now };
     try { await store.putItem(rec); } catch { return toast("Could not save. Browser storage may be full"); }
     await afterCreate(rec);
     if (u) {
       const m = await fetchMeta(u);
-      if (m) await patch(rec.id, (cur) => ({ cover: cur.cover || m.cover || "", desc: cur.desc || m.desc, title: cur.autoTitle && m.title ? m.title : cur.title }));
+      if (m) await patch(rec.id, (cur) => ({
+        cover: cur.cover || m.cover || "", desc: cur.desc || m.desc,
+        title: cur.autoTitle && m.title ? m.title : cur.title,
+        type: cur.autoType ? detect.fromText({ url: u, title: m.title, desc: m.desc }) : cur.type,
+      }));
     }
   }, [afterCreate, patch, toast]);
 
-  const createFromFile = useCallback(async (f) => {
+  const createFromFile = useCallback(async (f, forced = null) => {
     if (!f) return;
     if (!/^(image|video)\//.test(f.type)) return toast("That file is not an image or video");
     if (f.size > MAX) return toast("File is over 20 MB. Compress it and try again");
     const now = new Date().toISOString(), imageId = store.uid();
-    const anim = f.type === "image/gif" || f.type.startsWith("video/");
-    const rec = { id: store.uid(), url: "", title: (f.name || "").replace(/\.[a-z0-9]+$/i, "").replace(/^image$/i, ""), type: anim ? "Animation" : "Image", tags: [], note: "", fav: false, imageId, createdAt: now, updatedAt: now };
+    const type = forced || (await detect.fromFile(f));
+    const rec = { id: store.uid(), url: "", title: (f.name || "").replace(/\.[a-z0-9]+$/i, "").replace(/^image$/i, ""), type, autoType: !forced, tags: [], note: "", fav: false, imageId, createdAt: now, updatedAt: now };
     try { await store.putFile(imageId, f); await store.putItem(rec); }
     catch (e) { return toast(e?.name === "QuotaExceededError" ? "Browser storage is full. Export a backup and delete old items" : "Could not save. Try again"); }
     afterCreate(rec);
@@ -626,12 +786,11 @@ export default function App() {
   const min = DENSITY[density];
   const hour = new Date().getHours();
   const greet = hour < 5 ? "Good night." : hour < 12 ? "Good morning." : hour < 18 ? "Good afternoon." : "Good evening.";
-  const recent = items.slice(0, 3);
 
   return (
     <div className="app" ref={rootRef}>
       <header className="topbar">
-        <div className="white-pill brand-pill static"><Icon.logo /><b>Swipe File</b><span className="brand-sub">Personal inspiration library</span></div>
+        <div className="logo-pill" aria-label="Swipe File"><Icon.logo /></div>
         <div className={"search-pill" + (searchOpen ? " open" : "")}>
           <Icon.search />
           <input ref={searchRef} type="search" value={qLive} placeholder="Search anything you saved…" aria-label="Search"
@@ -640,7 +799,7 @@ export default function App() {
           <AnimatePresence>
             {searchOpen && !!tagList.length && (
               <motion.div className="search-pop" initial={{ opacity: 0, y: -6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -4 }} transition={{ duration: 0.16 }}>
-                <div className="d-label">Filter by tag</div>
+                <div className="pop-label">Filter by tag</div>
                 <div className="tags">
                   {tagList.slice(0, 24).map((t) => (
                     <button key={t} type="button" className={"chip" + (tags.has(t) ? " on" : "")} onMouseDown={(e) => { e.preventDefault(); toggleTag(t); }}>#{t}</button>
@@ -651,36 +810,27 @@ export default function App() {
           </AnimatePresence>
         </div>
         <div className="top-right">
-          {!!items.length && <WeekRing n={week} />}
           <button type="button" className="white-pill" onClick={surprise}><Icon.sparkle /> <span className="hide-sm">Surprise me</span></button>
-          <button type="button" className="white-pill icon" onClick={() => setBackup(true)} aria-label="Backup" title="Backup"><Icon.download /></button>
         </div>
       </header>
 
-      {view === "places" && groups.length > 1 && (
-        <nav className="rail" aria-label="Jump to section">
-          {groups.map(([t]) => (
-            <button key={t} type="button" className={"rail-dot" + (active === t ? " on" : "")} style={{ "--dot": color(t) }}
-              onClick={() => scrollToEl(document.getElementById(slug(t)))} aria-label={label(t)}>
-              <span className="rail-tip">{label(t)}</span>
-            </button>
-          ))}
-        </nav>
+      {!!items.length && (
+        <Rail view={view} groups={allGroups} active={active} onPick={pick} onRandom={surprise} onSettings={() => setBackup(true)} />
       )}
 
       <main className="page">
         <section className="hello">
           <p className="eyebrow">{items.length ? `${items.length} things saved` : "Your library is empty"}</p>
           <h1>{greet}</h1>
-          <p className="hello-sub">{items.length ? "What are you designing today? Search it, or let a random pick surprise you." : "Paste a link or a screenshot anywhere on this page. It lands in the right place automatically."}</p>
-          <div className="views" role="tablist" aria-label="View">
-            {[["places", "By type", <Icon.grid key="g" />], ["latest", "Latest", <Icon.clock key="c" />], ["fav", "Favorites", <Icon.bookmark key="b" />]].map(([k, l, ic]) => (
-              <button key={k} type="button" role="tab" aria-selected={view === k} className={"view-tab" + (view === k ? " on" : "")} onClick={() => setView(k)}>
-                {view === k && <motion.i layoutId="viewbg" className="view-bg" transition={spring} />}
-                <span>{ic}{l}</span>
-              </button>
-            ))}
-          </div>
+          <p className="hello-sub">{items.length ? "What are you designing today? Search it, or let a random pick surprise you." : "Paste a link, a screenshot or a video anywhere on this page. It lands in the right place automatically."}</p>
+          {!!items.length && (
+            <div className="mchips" role="toolbar" aria-label="Browse">
+              {[["all", "Everything"], ["latest", "Latest"], ["fav", "Favorites"]].map(([k, l]) => (
+                <button key={k} type="button" className={"chip" + ((k === "all" ? view === "places" : view === k) ? " on" : "")} onClick={() => pick(k)}>{l}</button>
+              ))}
+              {allGroups.map(([t]) => <button key={t} type="button" className="chip" onClick={() => pick(t)}><i style={{ background: color(t) }} />{label(t)}</button>)}
+            </div>
+          )}
           {filtersOn && (
             <div className="active-filters">
               <span>{filtered.length} {filtered.length === 1 ? "result" : "results"}{q ? <> for “{q}”</> : null}</span>
@@ -701,7 +851,7 @@ export default function App() {
         ) : !filtered.length ? (
           <motion.div className="empty" initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
             <h2>{view === "fav" && !filtersOn ? "No favorites yet" : "Nothing matches"}</h2>
-            <p>{view === "fav" && !filtersOn ? "Open a reference and tap Favorite to keep it here." : "Try fewer words, or clear the tags."}</p>
+            <p>{view === "fav" && !filtersOn ? "Open a reference and add it to favorites to keep it here." : "Try fewer words, or clear the tags."}</p>
             <button className="white-pill" type="button" onClick={() => { clearFilters(); setView("places"); }}>Show everything</button>
           </motion.div>
         ) : view === "places" ? (
@@ -719,13 +869,6 @@ export default function App() {
         )}
       </main>
 
-      <div className="corner left">
-        {!!recent.length && (
-          <button type="button" className="white-pill recent" onClick={() => { setView("latest"); clearFilters(); scrollTop(); }}>
-            <span className="rstack">{recent.map((it) => <Thumb key={it.id} it={it} />)}</span> <span className="hide-sm">Recently saved</span>
-          </button>
-        )}
-      </div>
       <div className="dock">
         <AnimatePresence>{composer && <Composer onText={createFromText} onFile={createFromFile} onClose={() => setComposer(false)} />}</AnimatePresence>
         <button type="button" className="black-pill lg" onClick={() => setComposer((v) => !v)} aria-expanded={composer}>
