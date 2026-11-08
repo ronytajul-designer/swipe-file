@@ -273,6 +273,40 @@ kbd.inv { background: rgb(255 255 255 / .14); color: rgb(255 255 255 / .7); }
 .meta dd { margin: 0; font-weight: 600; font-variant-numeric: tabular-nums; }
 .row { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 4px; }
 
+
+/* viewer footer: category · source link · delete */
+.dv-title { flex: 1; min-width: 0; border: 0; outline: none; background: none; font-size: 19px; font-weight: 600; letter-spacing: -.01em; color: var(--ink); padding: 4px 6px; margin-left: -6px; border-radius: 8px; text-overflow: ellipsis; }
+.dv-title:hover { background: var(--soft); }
+.dv-title:focus { background: var(--soft); box-shadow: 0 0 0 1.5px var(--ink); }
+.dv-title::placeholder { color: var(--faint); }
+.dv-foot { grid-template-columns: 1fr auto 1fr; }
+.dv-foot .found-chip { justify-self: start; }
+.source { display: flex; align-items: center; gap: 4px; min-width: 0; max-width: min(560px, 50vw); }
+.source-pill { display: inline-flex; align-items: center; gap: 9px; height: 46px; padding: 0 18px; border-radius: 999px; background: var(--ink); color: #fff; text-decoration: none; font-size: 15px; font-weight: 600; min-width: 0; transition: background .15s, transform .15s; }
+.source-pill:hover { background: #2a2a2a; }
+.source-pill:active { transform: scale(.98); }
+.source-pill span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.source-pill .favicon { width: 16px; height: 16px; border-radius: 4px; background: #fff; flex: none; }
+.source-pill svg { flex: none; }
+.source-in { display: flex; align-items: center; gap: 10px; height: 46px; padding: 0 16px; border-radius: 999px; background: var(--soft); color: var(--muted); width: min(460px, 46vw); transition: box-shadow .15s, background .15s; }
+.source-in:focus-within { background: #fff; box-shadow: 0 0 0 1.5px var(--ink); color: var(--ink); }
+.source-in input { flex: 1; min-width: 0; border: 0; outline: none; background: none; font-size: 14.5px; color: var(--ink); }
+.source-in input::placeholder { color: var(--muted); }
+.del-btn { justify-self: end; display: inline-flex; align-items: center; gap: 8px; height: 42px; padding: 0 14px; border: 0; border-radius: 999px; background: none; color: var(--muted); font-size: 14.5px; font-weight: 600; cursor: pointer; transition: background .15s, color .15s; }
+.del-btn:hover { color: var(--danger); background: #fdeeed; }
+.del-btn.armed { background: var(--danger); color: #fff; }
+.tbtn.wide { width: auto; padding: 0 10px 0 12px; gap: 6px; display: inline-flex; align-items: center; font-size: 12.5px; font-weight: 600; border-radius: 999px; max-width: 220px; white-space: nowrap; }
+.files { display: flex; flex-wrap: wrap; gap: 6px; }
+.files .chip { gap: 6px; padding-right: 6px; }
+@media (max-width: 860px) {
+  .dv-foot { grid-template-columns: 1fr auto; }
+  .source { grid-column: 1 / -1; grid-row: 2; max-width: none; justify-content: center; }
+  .source-pill { flex: 1; justify-content: center; }
+  .source-in { width: 100%; }
+  .del-btn span { display: none; }
+  .del-btn.armed span { display: inline; }
+}
+
 /* ---------- responsive ---------- */
 @media (max-width: 1100px) {
   .overlay { padding: 16px; }

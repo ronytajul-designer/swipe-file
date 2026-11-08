@@ -15,6 +15,11 @@ const META = {
   "Typography": ["Typography", "#dcc074"], "Color": ["Color", "#ee8a85"], "Image": ["Images", "#7cc3cc"],
   "Copy": ["Copy", "#c4a68d"], "Quote": ["Quotes", "#9aa5e3"], "Note": ["Notes", "#aab6bf"], "Other": ["Other", "#c4c0b8"],
 };
+// Setting a source link can sharpen an auto-picked category (e.g. a dribbble.com shot), never a manual one.
+const withSource = (u) => (cur) => {
+  const guess = detect.fromText({ url: u, title: cur.title });
+  return { url: u, ...(cur.autoType && guess !== "Website" ? { type: guess } : {}) };
+};
 const label = (t) => META[t]?.[0] || t;
 const color = (t) => META[t]?.[1] || "#c4c0b8";
 const slug = (t) => "sec-" + t.toLowerCase().replace(/\s+/g, "-");
@@ -113,7 +118,7 @@ function Favicon({ it, size = 20 }) {
 }
 
 /* ---------- card ---------- */
-function Card({ it, onOpen, onFav }) {
+function Card({ it, onOpen }) {
   const inner = useRef(null);
   const [broken, setBroken] = useState(false);
   const kind = kindOf(it, broken);
@@ -154,18 +159,17 @@ function Card({ it, onOpen, onFav }) {
         {kind === "note" && (
           <div className="sheet note">{it.title && it.note && <h3>{it.title}</h3>}<p>{it.note || it.title}</p><span className="sub">{fmtDate(it.createdAt)}</span></div>
         )}
-        <div className="card-tools">
-          <button type="button" className={"tbtn" + (it.fav ? " on" : "")} aria-label={it.fav ? "Remove from favorites" : "Add to favorites"}
-            onClick={(e) => { e.stopPropagation(); onFav(it); }}>{it.fav ? <Icon.bookmarkFill /> : <Icon.bookmark />}</button>
-          {url && <a className="tbtn" href={url} target="_blank" rel="noopener noreferrer" aria-label={"Open " + host(url)} onClick={(e) => e.stopPropagation()}><Icon.ext /></a>}
-        </div>
-        {it.fav && <span className="fav-mark" aria-hidden><Icon.bookmarkFill /></span>}
+        {url && (
+          <div className="card-tools">
+            <a className="tbtn wide" href={url} target="_blank" rel="noopener noreferrer" title={url} onClick={(e) => e.stopPropagation()}>{host(url)} <Icon.ext /></a>
+          </div>
+        )}
       </div>
     </motion.article>
   );
 }
 
-function Masonry({ list, min, onOpen, onFav }) {
+function Masonry({ list, min, onOpen }) {
   const ref = useRef(null);
   const n = useColumns(ref, min);
   const cols = useMemo(() => { const c = Array.from({ length: n }, () => []); list.forEach((it, i) => c[i % n].push(it)); return c; }, [list, n]);
@@ -175,7 +179,7 @@ function Masonry({ list, min, onOpen, onFav }) {
       {cols.map((col, ci) => (
         <div className="col" key={ci}>
           <AnimatePresence mode="popLayout" initial={false}>
-            {col.map((it) => <Card key={it.id} it={it} onOpen={onOpen} onFav={onFav} />)}
+            {col.map((it) => <Card key={it.id} it={it} onOpen={onOpen} />)}
           </AnimatePresence>
         </div>
       ))}
@@ -229,7 +233,6 @@ function Rail({ view, groups, active, onPick, onRandom, onSettings }) {
       animate={{ width: open ? 212 : 44 }} transition={soft}>
       <RailRow open={open} k="all" text="Everything" dot="linear-gradient(#7c9cf0,#b39af0)" on={view === "places" && !active} onClick={() => onPick("all")} />
       <RailRow open={open} k="latest" text="Latest" dot="#111" on={view === "latest"} onClick={() => onPick("latest")} />
-      <RailRow open={open} k="fav" text="Favorites" dot="var(--accent)" on={view === "fav"} onClick={() => onPick("fav")} />
       {!!groups.length && <span className="rail-sep" />}
       {groups.map(([type, l]) => (
         <RailRow open={open} key={type} k={label(type)} text={<>{label(type)}<em>{l.length}</em></>} dot={color(type)} on={view === "places" && active === type} onClick={() => onPick(type)} />
@@ -248,7 +251,7 @@ function Modal({ open, onClose, children, label: aria, className = "" }) {
     if (!open) return;
     lockScroll(true);
     const prev = document.activeElement;
-    const t = setTimeout(() => (ref.current?.querySelector("[data-autofocus]") || ref.current)?.focus(), 80);
+    const t = setTimeout(() => { if (!ref.current?.contains(document.activeElement)) (ref.current?.querySelector("[data-autofocus]") || ref.current)?.focus(); }, 80);
     const trap = (e) => {
       if (e.key !== "Tab" || !ref.current) return;
       const f = [...ref.current.querySelectorAll("a[href],button:not([disabled]),input,select,textarea,[tabindex='0']")].filter((x) => x.offsetParent);
@@ -346,32 +349,34 @@ function StageImage({ src, onDims, onBroken }) {
   );
 }
 
-/* ---------- detail (Mobbin-clean: header, stage, footer; everything else behind More info) ---------- */
-function Detail({ it, onClose, patch, remove, setImage, toast, allTags, onPrev, onNext, onTag }) {
+/* ---------- detail: the saved thing, its source link, delete. Nothing else. ---------- */
+function Detail({ it, onClose, patch, remove, setImage, toast, onPrev, onNext, linkFocus }) {
   const [broken, setBroken] = useState(false);
   const kind = kindOf(it, broken);
   const link = safeUrl(it.url);
   const canLive = link.startsWith("https:");
   const hasMedia = kind === "media";
-  const [mode, setMode] = useState(canLive ? "live" : "media");
+  const [mode, setMode] = useState("saved");
   const [device, setDevice] = useState("desktop");
-  const [dims, setDims] = useState(null);
-  const [info, setInfo] = useState(false);
-  const [menu, setMenu] = useState(false);
+  const [title, setTitle] = useState(it.title || "");
+  const [editLink, setEditLink] = useState(!link || !!linkFocus);
+  const [url, setUrl] = useState(it.url || "");
   const [armed, setArmed] = useState(false);
   const [over, setOver] = useState(false);
-  const file = useRef(null);
+  const [, setDims] = useState(null);
+  useAutosave(title, (v) => patch(it.id, { title: v.trim(), autoTitle: false }));
   useEffect(() => { if (!armed) return; const t = setTimeout(() => setArmed(false), 3000); return () => clearTimeout(t); }, [armed]);
-  const showLive = canLive && (mode === "live" || !hasMedia);
+  useEffect(() => { setUrl(it.url || ""); }, [it.url]);
+  // Live is a viewing option for the source link; the saved media is always the default when there is one.
+  const showLive = canLive && (!hasMedia || mode === "live");
 
-  const copy = async () => {
-    if (it.imageId && !dims?.video) {
-      try { await copyImage(it); return toast("Image copied"); } catch {}
-    }
-    if (link) return navigator.clipboard?.writeText(link).then(() => toast("Link copied"), () => toast("Copy failed"));
-    if (it.note) return navigator.clipboard?.writeText(it.note).then(() => toast("Text copied"), () => toast("Copy failed"));
+  const commitUrl = () => {
+    const u = url.trim();
+    if (u === (it.url || "")) { if (u) setEditLink(false); return; }
+    if (u && !safeUrl(u)) { toast("Link needs to start with https://"); return; }
+    patch(it.id, u ? withSource(u) : { url: "" });
+    if (u) { setEditLink(false); toast("Source link saved"); }
   };
-  const dimLabel = dims ? `${dims.video ? "Video" : dims.h / dims.w > 1.45 ? "Full page" : dims.w < 600 ? "Mobile" : "Desktop"} (${dims.w}×${dims.h})` : showLive ? (device === "mobile" ? "Live · Mobile 390" : "Live · Desktop 1440") : "";
 
   return (
     <div className="dv" onDragOver={(e) => { e.preventDefault(); setOver(true); }} onDragLeave={(e) => e.currentTarget === e.target && setOver(false)}
@@ -379,11 +384,12 @@ function Detail({ it, onClose, patch, remove, setImage, toast, allTags, onPrev, 
       <header className="dv-head">
         <div className="dv-id">
           <span className="dv-logo" style={{ "--dot": color(it.type) }}>{link ? <Favicon it={it} size={22} /> : <i />}</span>
-          <b>{it.title || niceName(it.url) || (kind === "note" ? "Note" : "Untitled")}</b>
+          <input className="dv-title" value={title} placeholder={niceName(it.url) || "Untitled"} aria-label="Title"
+            onChange={(e) => setTitle(e.target.value)} onKeyDown={(e) => e.key === "Enter" && e.target.blur()} />
         </div>
         {canLive && hasMedia && (
-          <div className="seg" role="tablist" aria-label="Preview mode">
-            {[["live", "Live site"], ["media", "Screenshot"]].map(([k, l]) => (
+          <div className="seg" role="tablist" aria-label="Preview">
+            {[["saved", "Saved"], ["live", "Live site"]].map(([k, l]) => (
               <button key={k} type="button" role="tab" aria-selected={mode === k} className={mode === k ? "on" : ""} onClick={() => setMode(k)}>
                 {mode === k && <motion.i layoutId="segbg" className="seg-bg" transition={spring} />}<span>{l}</span>
               </button>
@@ -400,8 +406,6 @@ function Detail({ it, onClose, patch, remove, setImage, toast, allTags, onPrev, 
               ))}
             </div>
           )}
-          {link && <button type="button" className="icon-btn" title="Copy link" aria-label="Copy link" onClick={() => navigator.clipboard?.writeText(link).then(() => toast("Link copied"))}><Icon.link /></button>}
-          <span className="vsep" />
           <button type="button" className="icon-btn" onClick={onClose} aria-label="Close" data-autofocus><Icon.x /></button>
         </div>
       </header>
@@ -411,115 +415,79 @@ function Detail({ it, onClose, patch, remove, setImage, toast, allTags, onPrev, 
           : hasMedia ? <MediaStage it={it} onDims={setDims} onBroken={() => setBroken(true)} />
           : kind === "quote" ? <div className="stage-center"><p className="stage-quote">“{it.note || it.title}”</p></div>
           : kind === "note" ? <div className="stage-center"><p className="stage-note">{it.note || it.title}</p></div>
-          : <div className="stage-center"><div className="stage-empty"><Favicon it={it} size={40} /><b>{it.title || niceName(it.url)}</b><span>Live preview needs an https link. Drop or paste a screenshot to add one.</span></div></div>}
+          : <div className="stage-center"><div className="stage-empty"><Favicon it={it} size={40} /><b>{it.title || niceName(it.url)}</b><span>Live preview needs an https link. Drop or paste a screenshot here to keep a copy.</span></div></div>}
         <button type="button" className="arrow prev" onClick={onPrev} aria-label="Previous"><Icon.left /></button>
         <button type="button" className="arrow next" onClick={onNext} aria-label="Next"><Icon.right /></button>
-
-        <AnimatePresence>
-          {info && <InfoPanel key="info" it={it} patch={patch} toast={toast} allTags={allTags} onTag={onTag} onClose={() => setInfo(false)} />}
-        </AnimatePresence>
       </div>
 
       <footer className="dv-foot">
-        <div className="dv-found">
-          <span>Found in</span>
-          <label className="found-chip"><i style={{ background: color(it.type) }} />
-            <select value={it.type} aria-label="Type" onChange={(e) => patch(it.id, { type: e.target.value, autoType: false })}>{TYPES.map((t) => <option key={t}>{t}</option>)}</select>
-          </label>
+        <label className="found-chip" title="Category"><i style={{ background: color(it.type) }} />
+          <select value={it.type} aria-label="Category" onChange={(e) => patch(it.id, { type: e.target.value, autoType: false })}>{TYPES.map((t) => <option key={t}>{t}</option>)}</select>
+        </label>
+
+        <div className="source">
+          {link && !editLink ? (
+            <>
+              <a className="source-pill" href={link} target="_blank" rel="noopener noreferrer" title={link}>
+                <Favicon it={it} size={16} /><span>{link.replace(/^https?:\/\/(www\.)?/, "").replace(/\/$/, "")}</span><Icon.ext />
+              </a>
+              <button type="button" className="icon-btn sm" aria-label="Edit source link" title="Edit link" onClick={() => setEditLink(true)}><Icon.edit /></button>
+            </>
+          ) : (
+            <div className="source-in">
+              <Icon.link />
+              <input autoFocus={!!linkFocus || !!it.url} type="url" inputMode="url" value={url} placeholder="Paste the source link (where you found this)" aria-label="Source link"
+                onChange={(e) => setUrl(e.target.value)} onBlur={commitUrl}
+                onKeyDown={(e) => { if (e.key === "Enter") e.target.blur(); if (e.key === "Escape" && link) { e.stopPropagation(); setUrl(it.url); setEditLink(false); } }} />
+            </div>
+          )}
         </div>
-        <div className="dv-actions">
-          {link ? <a className="black-pill" href={link} target="_blank" rel="noopener noreferrer">Open site</a>
-            : <button type="button" className={"black-pill" + (it.fav ? " faved" : "")} onClick={() => patch(it.id, (cur) => ({ fav: !cur.fav }))}>{it.fav ? "Saved" : "Save"}</button>}
-          <button type="button" className="soft-pill" onClick={copy}>Copy</button>
-          <div className="menu-wrap">
-            <button type="button" className="soft-pill round-pill" aria-label="More actions" aria-expanded={menu} onClick={() => setMenu((v) => !v)}><Icon.dots /></button>
-            <AnimatePresence>
-              {menu && (
-                <motion.div className="menu" initial={{ opacity: 0, y: 6, scale: 0.97 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: 4 }} transition={{ duration: 0.14 }}
-                  onMouseLeave={() => setMenu(false)}>
-                  <button type="button" onClick={() => { patch(it.id, (cur) => ({ fav: !cur.fav })); setMenu(false); }}>{it.fav ? <Icon.bookmarkFill /> : <Icon.bookmark />}{it.fav ? "Remove favorite" : "Add to favorites"}</button>
-                  <button type="button" onClick={() => { file.current.click(); setMenu(false); }}><Icon.image />{it.imageId || it.cover ? "Replace image" : "Add screenshot"}</button>
-                  <button type="button" onClick={() => { setInfo(true); setMenu(false); }}><Icon.edit />Edit details</button>
-                  <button type="button" className={"danger" + (armed ? " armed" : "")} onClick={() => (armed ? remove(it) : setArmed(true))}><Icon.trash />{armed ? "Click again to delete" : "Delete"}</button>
-                </motion.div>
-              )}
-            </AnimatePresence>
-          </div>
-          <input ref={file} type="file" hidden accept="image/png,image/jpeg,image/gif,image/webp,image/svg+xml,video/mp4,video/webm" onChange={(e) => { setImage(it, e.target.files[0]); e.target.value = ""; }} />
-        </div>
-        <div className="dv-meta">
-          <span>{dimLabel}</span>
-          <span className="dv-date">Saved {fmtDate(it.createdAt)}{it.autoType ? " · auto-sorted" : ""}</span>
-          <button type="button" className={"more" + (info ? " on" : "")} onClick={() => setInfo((v) => !v)} aria-expanded={info}>{info ? "Hide info" : "More info"}</button>
-        </div>
+
+        <button type="button" className={"del-btn" + (armed ? " armed" : "")} onClick={() => (armed ? remove(it) : setArmed(true))}>
+          <Icon.trash /><span>{armed ? "Click again to delete" : "Delete"}</span>
+        </button>
       </footer>
     </div>
-  );
-}
-
-function InfoPanel({ it, patch, toast, allTags, onTag, onClose }) {
-  const [title, setTitle] = useState(it.title || "");
-  const [note, setNote] = useState(it.note || "");
-  const [url, setUrl] = useState(it.url || "");
-  const [draft, setDraft] = useState("");
-  useAutosave(title, (v) => patch(it.id, { title: v.trim(), autoTitle: false }));
-  useAutosave(note, (v) => patch(it.id, { note: v.trim() }));
-  const tags = it.tags || [];
-  const addTag = (raw) => {
-    const t = raw.trim().toLowerCase().replace(/^#/, "");
-    if (t) patch(it.id, (cur) => ({ tags: (cur.tags || []).includes(t) ? cur.tags : [...(cur.tags || []), t] }));
-    setDraft("");
-  };
-  const commitUrl = () => {
-    const u = url.trim();
-    if (u === (it.url || "")) return;
-    if (u && !safeUrl(u)) { toast("Link needs to start with https://"); setUrl(it.url || ""); return; }
-    patch(it.id, { url: u });
-  };
-  const sugg = allTags.filter((t) => !tags.includes(t) && (!draft || t.includes(draft.toLowerCase()))).slice(0, 6);
-  return (
-    <motion.aside className="info" data-lenis-prevent initial={{ x: 24, opacity: 0 }} animate={{ x: 0, opacity: 1 }} exit={{ x: 24, opacity: 0, transition: { duration: 0.15 } }} transition={soft}>
-      <div className="info-head"><span>Details</span><button type="button" className="icon-btn sm" onClick={onClose} aria-label="Close details"><Icon.x /></button></div>
-      <label className="f"><span>Title</span><input value={title} placeholder="Untitled" onChange={(e) => setTitle(e.target.value)} /></label>
-      {it.desc && <p className="info-desc">{it.desc}</p>}
-      <label className="f"><span className="accent">Why I saved it</span><textarea rows={4} value={note} placeholder="What would you steal from this?" onChange={(e) => setNote(e.target.value)} /></label>
-      <div className="f"><span>Tags</span>
-        <div className="tags">
-          {tags.map((t) => (
-            <span key={t} className="chip"><button type="button" className="chip-jump" onClick={() => onTag(t)}>#{t}</button>
-              <button type="button" className="chip-x" aria-label={"Remove tag " + t} onClick={() => patch(it.id, (cur) => ({ tags: (cur.tags || []).filter((x) => x !== t) }))}><Icon.x /></button></span>
-          ))}
-          <input className="tag-in" value={draft} placeholder="Add tag, Enter" aria-label="New tag" onChange={(e) => setDraft(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" || e.key === ",") { e.preventDefault(); addTag(draft); }
-              if (e.key === "Backspace" && !draft && tags.length) patch(it.id, (cur) => ({ tags: (cur.tags || []).slice(0, -1) }));
-            }} onBlur={() => draft && addTag(draft)} />
-        </div>
-        {!!sugg.length && <div className="sugg">{sugg.map((t) => <button key={t} type="button" className="chip faint" onMouseDown={(e) => { e.preventDefault(); addTag(t); }}>#{t}</button>)}</div>}
-      </div>
-      <label className="f"><span>Link</span><input className="mono" type="url" inputMode="url" placeholder="https://" value={url} onChange={(e) => setUrl(e.target.value)} onBlur={commitUrl} onKeyDown={(e) => e.key === "Enter" && e.target.blur()} /></label>
-      <p className="info-foot">Saved {ago(it.createdAt)}{it.updatedAt && it.updatedAt !== it.createdAt ? ` · edited ${ago(it.updatedAt)}` : ""}</p>
-    </motion.aside>
   );
 }
 
 /* ---------- composer (bottom dock) ---------- */
 function Composer({ onText, onFile, onClose }) {
   const [v, setV] = useState("");
+  const [files, setFiles] = useState([]);
   const [type, setType] = useState("");
   const file = useRef(null);
-  const submit = () => { const t = v.trim(); if (!t) return; onText(t, type || null); setV(""); onClose(); };
-  const isLink = !!safeUrl(v.trim()) && !/\s/.test(v.trim());
+  const text = v.trim();
+  const isLink = !!safeUrl(text) && !/\s/.test(text);
+  const canSave = files.length ? !text || isLink : !!text;
+  const submit = () => {
+    if (!canSave) return;
+    if (files.length) files.forEach((f) => onFile(f, type || null, isLink ? text : ""));
+    else onText(text, type || null);
+    onClose();
+  };
+  const addFiles = (list) => setFiles((cur) => [...cur, ...[...list].filter((f) => /^(image|video)\//.test(f.type))]);
   return (
     <motion.div className="composer" role="dialog" aria-label="Save something"
+      onDragOver={(e) => e.preventDefault()} onDrop={(e) => { e.preventDefault(); e.stopPropagation(); addFiles(e.dataTransfer.files); }}
+      onPaste={(e) => { const fs = [...(e.clipboardData?.files || [])]; if (fs.length) { e.preventDefault(); e.stopPropagation(); addFiles(fs); } }}
       initial={{ opacity: 0, y: 16, scale: 0.96 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: 10, scale: 0.97, transition: { duration: 0.15 } }} transition={spring}>
-      <textarea autoFocus rows={3} value={v} placeholder="Paste a link, or write a note…" aria-label="Link or note"
+      {!!files.length && (
+        <div className="files">
+          {files.map((f, i) => (
+            <span key={i} className="chip"><Icon.image />{(f.name || "Pasted image").slice(0, 28)}
+              <button type="button" className="chip-x" aria-label="Remove file" onClick={() => setFiles((c) => c.filter((_, j) => j !== i))}><Icon.x /></button></span>
+          ))}
+        </div>
+      )}
+      <textarea autoFocus rows={files.length ? 1 : 3} value={v} aria-label={files.length ? "Source link" : "Link or note"}
+        placeholder={files.length ? "Source link, where you found it (optional)" : "Paste a link, write a note, or paste a screenshot…"}
         onChange={(e) => setV(e.target.value)}
         onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); submit(); } if (e.key === "Escape") { e.stopPropagation(); onClose(); } }} />
       <div className="composer-foot">
-        <button type="button" className="ghost-btn" onClick={() => file.current.click()}><Icon.image /> Image or video</button>
+        <button type="button" className="ghost-btn" onClick={() => file.current.click()}><Icon.image /> Media</button>
         <input ref={file} type="file" hidden multiple accept="image/png,image/jpeg,image/gif,image/webp,image/svg+xml,video/mp4,video/webm"
-          onChange={(e) => { [...e.target.files].forEach((f) => onFile(f, type || null)); e.target.value = ""; onClose(); }} />
+          onChange={(e) => { addFiles(e.target.files); e.target.value = ""; }} />
         <label className="type-select">
           <i style={{ background: type ? color(type) : "linear-gradient(#7c9cf0,#ef8fb0)" }} />
           <select value={type} onChange={(e) => setType(e.target.value)} aria-label="Category">
@@ -527,8 +495,8 @@ function Composer({ onText, onFile, onClose }) {
             {TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
           </select>
         </label>
-        <span className="composer-hint">{v.trim() ? (isLink ? "Saves as a link" : "Saves as a note") : ""}</span>
-        <button type="button" className="black-pill sm" disabled={!v.trim()} onClick={submit}>Save</button>
+        <span className="composer-hint">{files.length && text && !isLink ? "Link needs https://" : ""}</span>
+        <button type="button" className="black-pill sm" disabled={!canSave} onClick={submit}>Save</button>
       </div>
     </motion.div>
   );
@@ -582,13 +550,14 @@ export default function App() {
   const [items, setItems] = useState([]);
   const [ready, setReady] = useState(false);
   const [error, setError] = useState("");
-  const [view, setView] = useState("places"); // places | latest | fav
+  const [view, setView] = useState("places"); // places | latest
   const [tags, setTags] = useState(() => new Set());
   const [q, setQ] = useState("");
   const [qLive, setQLive] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
   const [density, setDensity] = useState(() => { try { const s = localStorage.getItem("sf-density"); const v = Number(s); return s !== null && v >= 0 && v < DENSITY.length ? v : 2; } catch { return 2; } });
   const [openId, setOpenId] = useState(null);
+  const [linkFocus, setLinkFocus] = useState(null);
   const [backup, setBackup] = useState(false);
   const [composer, setComposer] = useState(false);
   const [active, setActive] = useState(null);
@@ -624,7 +593,6 @@ export default function App() {
   const filtered = useMemo(() => {
     const words = q.trim().toLowerCase().split(/\s+/).filter(Boolean);
     return items.filter((it) => {
-      if (view === "fav" && !it.fav) return false;
       for (const t of tags) if (!(it.tags || []).includes(t)) return false;
       if (words.length) { const hay = [it.title, it.url, it.note, it.desc, it.type, label(it.type), ...(it.tags || [])].join(" ").toLowerCase(); if (!words.every((w) => hay.includes(w))) return false; }
       return true;
@@ -660,7 +628,7 @@ export default function App() {
   }, [pendingJump, view, groups]);
 
   const pick = (k) => {
-    if (k === "latest" || k === "fav") { setView(k); scrollTop(); return; }
+    if (k === "latest") { setView(k); scrollTop(); return; }
     if (k === "all") { setView("places"); setActive(null); scrollTop(); return; }
     if (!groups.some(([t]) => t === k)) clearFilters();
     setView("places"); setPendingJump(k);
@@ -671,8 +639,9 @@ export default function App() {
   const afterCreate = useCallback(async (rec) => {
     await reload();
     clearFilters();
-    setView((v) => (v === "fav" ? "places" : v));
-    toast("Saved to " + label(rec.type), { label: "Open", run: () => setOpenId(rec.id) });
+    toast("Saved to " + label(rec.type), rec.url
+      ? { label: "Open", run: () => setOpenId(rec.id) }
+      : rec.imageId ? { label: "Add source link", run: () => { setLinkFocus(rec.id); setOpenId(rec.id); } } : null);
   }, [reload, toast, clearFilters]);
 
   const createFromText = useCallback(async (text, forced = null) => {
@@ -694,13 +663,15 @@ export default function App() {
     }
   }, [afterCreate, patch, toast]);
 
-  const createFromFile = useCallback(async (f, forced = null) => {
+  const createFromFile = useCallback(async (f, forced = null, src = "") => {
     if (!f) return;
     if (!/^(image|video)\//.test(f.type)) return toast("That file is not an image or video");
     if (f.size > MAX) return toast("File is over 20 MB. Compress it and try again");
     const now = new Date().toISOString(), imageId = store.uid();
     const type = forced || (await detect.fromFile(f));
-    const rec = { id: store.uid(), url: "", title: (f.name || "").replace(/\.[a-z0-9]+$/i, "").replace(/^image$/i, ""), type, autoType: !forced, tags: [], note: "", fav: false, imageId, createdAt: now, updatedAt: now };
+    const url = safeUrl(src);
+    const fname = (f.name || "").replace(/\.[a-z0-9]+$/i, "").replace(/^(image|screenshot.*|untitled)$/i, "");
+    const rec = { id: store.uid(), url, title: fname || niceName(url), type, autoType: !forced, tags: [], note: "", fav: false, imageId, createdAt: now, updatedAt: now };
     try { await store.putFile(imageId, f); await store.putItem(rec); }
     catch (e) { return toast(e?.name === "QuotaExceededError" ? "Browser storage is full. Export a backup and delete old items" : "Could not save. Try again"); }
     afterCreate(rec);
@@ -727,7 +698,6 @@ export default function App() {
     } catch { toast("Could not delete. Try again"); }
   }, [reload, toast]);
 
-  const toggleFav = useCallback((it) => patch(it.id, (cur) => ({ fav: !cur.fav })), [patch]);
   const surprise = useCallback(() => {
     if (!items.length) return toast("Save a few things first");
     const pool = items.length > 1 ? items.filter((i) => i.id !== openId) : items;
@@ -764,9 +734,12 @@ export default function App() {
       const img = [...(e.clipboardData?.items || [])].find((i) => i.kind === "file" && /^(image|video)\//.test(i.type));
       if (img && current) { e.preventDefault(); return setImage(current, img.getAsFile()); }
       if (img && !backup) { e.preventDefault(); setComposer(false); return createFromFile(img.getAsFile()); }
-      if (openId || backup || isTyping()) return;
+      if (backup || isTyping()) return;
       const txt = e.clipboardData?.getData("text")?.trim();
-      if (txt && safeUrl(txt) && !/\s/.test(txt)) { e.preventDefault(); createFromText(txt); }
+      if (!txt || !safeUrl(txt) || /\s/.test(txt)) return;
+      e.preventDefault();
+      if (current) { patch(current.id, withSource(safeUrl(txt))); toast("Source link saved"); return; }
+      createFromText(txt);
     };
     const onDragOver = (e) => { if ([...(e.dataTransfer?.types || [])].includes("Files")) e.preventDefault(); };
     const onDrop = (e) => {
@@ -781,7 +754,7 @@ export default function App() {
       document.removeEventListener("keydown", onKey); document.removeEventListener("paste", onPaste);
       window.removeEventListener("dragover", onDragOver); window.removeEventListener("drop", onDrop);
     };
-  }, [openId, backup, composer, current, step, setImage, createFromFile, createFromText, surprise]);
+  }, [openId, backup, composer, current, step, setImage, createFromFile, createFromText, surprise, patch, toast]);
 
   const min = DENSITY[density];
 
@@ -820,7 +793,7 @@ export default function App() {
         <section className="hello">
           {!!items.length && (
             <div className="mchips" role="toolbar" aria-label="Browse">
-              {[["all", "Everything"], ["latest", "Latest"], ["fav", "Favorites"]].map(([k, l]) => (
+              {[["all", "Everything"], ["latest", "Latest"]].map(([k, l]) => (
                 <button key={k} type="button" className={"chip" + ((k === "all" ? view === "places" : view === k) ? " on" : "")} onClick={() => pick(k)}>{l}</button>
               ))}
               {allGroups.map(([t]) => <button key={t} type="button" className="chip" onClick={() => pick(t)}><i style={{ background: color(t) }} />{label(t)}</button>)}
@@ -845,21 +818,21 @@ export default function App() {
           </motion.div>
         ) : !filtered.length ? (
           <motion.div className="empty" initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
-            <h2>{view === "fav" && !filtersOn ? "No favorites yet" : "Nothing matches"}</h2>
-            <p>{view === "fav" && !filtersOn ? "Open a reference and add it to favorites to keep it here." : "Try fewer words, or clear the tags."}</p>
+            <h2>Nothing matches</h2>
+            <p>Try fewer words, or clear the tags.</p>
             <button className="white-pill" type="button" onClick={() => { clearFilters(); setView("places"); }}>Show everything</button>
           </motion.div>
         ) : view === "places" ? (
           groups.map(([t, l]) => (
             <section key={t} id={slug(t)} data-type={t} className="place">
               <SectionTitle text={label(t)} count={l.length} dot={color(t)} />
-              <Masonry list={l} min={min} onOpen={setOpenId} onFav={toggleFav} />
+              <Masonry list={l} min={min} onOpen={setOpenId} />
             </section>
           ))
         ) : (
           <section className="place">
-            <SectionTitle key={view} text={view === "fav" ? "Favorites" : "Latest"} count={filtered.length} dot={view === "fav" ? "var(--accent)" : "#111"} />
-            <Masonry list={filtered} min={min} onOpen={setOpenId} onFav={toggleFav} />
+            <SectionTitle key={view} text="Latest" count={filtered.length} dot="#111" />
+            <Masonry list={filtered} min={min} onOpen={setOpenId} />
           </section>
         )}
       </main>
@@ -879,11 +852,10 @@ export default function App() {
         </div>
       </div>
 
-      <Modal open={!!current} onClose={() => setOpenId(null)} label="Reference" className="detail">
+      <Modal open={!!current} onClose={() => { setOpenId(null); setLinkFocus(null); }} label="Reference" className="detail">
         {current && (
-          <Detail key={current.id} it={current} onClose={() => setOpenId(null)} patch={patch} remove={remove} setImage={setImage}
-            toast={toast} allTags={tagList} onPrev={() => step(-1)} onNext={() => step(1)}
-            onTag={(t) => { setTags(new Set([t])); setOpenId(null); }} />
+          <Detail key={current.id} it={current} onClose={() => { setOpenId(null); setLinkFocus(null); }} patch={patch} remove={remove} setImage={setImage}
+            toast={toast} onPrev={() => step(-1)} onNext={() => step(1)} linkFocus={linkFocus === current.id} />
         )}
       </Modal>
       <Modal open={backup} onClose={() => setBackup(false)} label="Backup" className="small">
