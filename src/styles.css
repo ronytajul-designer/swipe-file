@@ -320,6 +320,53 @@ kbd.inv { background: rgb(255 255 255 / .14); color: rgb(255 255 255 / .7); }
   .del-btn.armed span { display: inline; }
 }
 
+
+/* ---------- pager (header) ---------- */
+.pager { display: inline-flex; align-items: center; gap: 2px; height: 40px; padding: 0 4px; border-radius: 999px; background: var(--soft); }
+.pager button { width: 32px; height: 32px; border: 0; border-radius: 50%; background: none; color: var(--ink-2); display: grid; place-items: center; cursor: pointer; transition: background .15s, color .15s; }
+.pager button:hover { background: #fff; color: var(--ink); box-shadow: 0 1px 3px rgb(0 0 0 / .08); }
+.pager button svg { width: 16px; height: 16px; }
+.pager span { min-width: 54px; text-align: center; font-size: 13.5px; font-weight: 600; font-variant-numeric: tabular-nums; color: var(--ink); }
+.pager em { font-style: normal; color: var(--muted); font-weight: 500; }
+
+/* ---------- long screenshot: hidden scrollbar + minimap ---------- */
+.stage-tall { position: relative; height: 100%; }
+.stage-tall .stage-scroll { scrollbar-width: none; padding-right: 120px; padding-left: 120px; }
+.stage-tall .stage-scroll::-webkit-scrollbar { display: none; }
+.minimap { position: absolute; right: 16px; top: 8px; bottom: 24px; width: 72px; display: flex; flex-direction: column; align-items: center; gap: 8px; }
+.mm-frame { position: relative; width: 100%; max-height: calc(100% - 26px); border-radius: 8px; overflow: hidden; cursor: pointer; background: var(--soft); box-shadow: 0 0 0 1px rgb(0 0 0 / .06), 0 6px 18px rgb(0 0 0 / .08); touch-action: none; transition: transform .2s; }
+.minimap:hover .mm-frame { transform: scale(1.04); }
+.minimap.drag .mm-frame { cursor: grabbing; }
+.mm-frame img { display: block; width: 100%; height: 100%; object-fit: cover; object-position: top; opacity: .55; pointer-events: none; user-select: none; }
+.mm-view { position: absolute; left: 0; right: 0; border-radius: 4px; box-shadow: 0 0 0 2px var(--ink), 0 0 0 9999px rgb(246 245 242 / .35); background: rgb(255 255 255 / .1); transition: top .08s linear; pointer-events: none; }
+.minimap.drag .mm-view { transition: none; }
+.mm-pct { font-size: 12px; font-weight: 600; color: var(--muted); font-variant-numeric: tabular-nums; }
+
+/* ---------- category picker ---------- */
+.cp { position: relative; }
+.cp-trigger { display: inline-flex; align-items: center; gap: 8px; height: 38px; padding: 0 12px 0 13px; border-radius: 999px; border: 0; background: var(--soft); color: var(--ink); font-size: 14.5px; font-weight: 600; cursor: pointer; transition: background .15s, box-shadow .15s; white-space: nowrap; }
+.cp-trigger:hover { background: #ebe9e3; }
+.cp-trigger.open { background: #fff; box-shadow: 0 0 0 1.5px var(--ink); }
+.cp-trigger i, .cp-opt i { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+.cp-chev { color: var(--muted); transition: transform .2s; }
+.cp-trigger.open .cp-chev { transform: rotate(180deg); }
+.cp-pop { position: absolute; bottom: calc(100% + 10px); left: 0; width: 360px; max-width: calc(100vw - 32px); background: #fff; border-radius: 18px; padding: 10px; box-shadow: 0 18px 50px rgb(30 25 15 / .16), 0 0 0 1px rgb(0 0 0 / .05); z-index: 30; transform-origin: bottom left; }
+.cp-head { font-size: 12px; font-weight: 600; color: var(--muted); padding: 4px 8px 8px; }
+.cp-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 2px; }
+.cp-opt { display: flex; align-items: center; gap: 10px; height: 38px; padding: 0 10px; border: 0; border-radius: 10px; background: none; color: var(--ink-2); font-size: 14px; font-weight: 500; cursor: pointer; text-align: left; outline: none; }
+.cp-opt span { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cp-opt:hover, .cp-opt:focus-visible { background: var(--soft); color: var(--ink); }
+.cp-opt.on { background: var(--ink); color: #fff; }
+.cp-opt.on i { box-shadow: 0 0 0 2px rgb(255 255 255 / .9); }
+.cp-opt.auto { grid-column: 1 / -1; }
+.cp.in-composer .cp-trigger { height: 36px; font-size: 13.5px; }
+@media (max-width: 860px) {
+  .stage-tall .stage-scroll { padding: 4px 76px 16px 0; }
+  .minimap { right: 8px; width: 56px; }
+  .pager span { min-width: 44px; }
+  .cp-pop { width: 320px; }
+}
+
 /* ---------- responsive ---------- */
 @media (max-width: 1100px) {
   .overlay { padding: 16px; }

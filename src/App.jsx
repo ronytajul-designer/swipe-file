@@ -341,60 +341,107 @@ function MediaStage({ it, onDims, onBroken }) {
 }
 function StageImage({ src, onDims, onBroken }) {
   const [tall, setTall] = useState(false);
+  const scroller = useRef(null);
+  const img = (
+    <img className="stage-img" src={src} alt="" referrerPolicy="no-referrer" onError={onBroken}
+      onLoad={(e) => { const w = e.target.naturalWidth, h = e.target.naturalHeight; setTall(h / w > 1.2); onDims({ w, h }); }} />
+  );
+  if (!tall) return <div className="stage-center fit">{img}</div>;
   return (
-    <div className={tall ? "stage-scroll" : "stage-center fit"} data-lenis-prevent>
-      <img className="stage-img" src={src} alt="" referrerPolicy="no-referrer" onError={onBroken}
-        onLoad={(e) => { const w = e.target.naturalWidth, h = e.target.naturalHeight; setTall(h / w > 1.2); onDims({ w, h }); }} />
+    <div className="stage-tall">
+      <div className="stage-scroll" ref={scroller} data-lenis-prevent>{img}</div>
+      <Minimap src={src} scroller={scroller} />
     </div>
   );
 }
 
-/* ---------- tags: chips + one inline input, Enter to add ---------- */
-function TagRow({ it, patch, allTags }) {
-  const [adding, setAdding] = useState(false);
-  const [d, setD] = useState("");
-  const tags = it.tags || [];
-  const add = (raw) => {
-    const t = raw.trim().toLowerCase().replace(/^#/, "").replace(/\s+/g, "-");
-    if (t) patch(it.id, (cur) => ({ tags: (cur.tags || []).includes(t) ? cur.tags : [...(cur.tags || []), t] }));
-    setD("");
+/* Mini page map for long screenshots: shows where you are, click or drag to jump. */
+function Minimap({ src, scroller }) {
+  const box = useRef(null);
+  const [v, setV] = useState({ top: 0, h: 0.2, pct: 0 });
+  const [ratio, setRatio] = useState(3);
+  const [drag, setDrag] = useState(false);
+  useEffect(() => {
+    const el = scroller.current; if (!el) return;
+    const upd = () => {
+      const max = el.scrollHeight - el.clientHeight;
+      setV({ top: el.scrollTop / el.scrollHeight, h: el.clientHeight / el.scrollHeight, pct: max > 0 ? Math.round((el.scrollTop / max) * 100) : 0 });
+    };
+    upd(); el.addEventListener("scroll", upd, { passive: true });
+    const ro = new ResizeObserver(upd); ro.observe(el);
+    return () => { el.removeEventListener("scroll", upd); ro.disconnect(); };
+  }, [scroller]);
+  const jump = (clientY, smooth) => {
+    const el = scroller.current, b = box.current?.getBoundingClientRect();
+    if (!el || !b) return;
+    const f = Math.min(1, Math.max(0, (clientY - b.top) / b.height));
+    el.scrollTo({ top: f * el.scrollHeight - el.clientHeight / 2, behavior: smooth ? "smooth" : "auto" });
   };
-  const q = d.trim().toLowerCase().replace(/^#/, "");
-  const sugg = allTags.filter((t) => !tags.includes(t) && (!q || t.includes(q))).slice(0, 6);
   return (
-    <div className="tagrow">
-      <AnimatePresence initial={false}>
-        {tags.map((t) => (
-          <motion.span layout key={t} className="tagchip" initial={{ opacity: 0, scale: 0.85 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.85 }} transition={spring}>
-            #{t}
-            <button type="button" aria-label={"Remove tag " + t} onClick={() => patch(it.id, (cur) => ({ tags: (cur.tags || []).filter((x) => x !== t) }))}><Icon.x /></button>
-          </motion.span>
-        ))}
+    <div className={"minimap" + (drag ? " drag" : "")} aria-hidden>
+      <div className="mm-frame" ref={box} style={{ aspectRatio: `1 / ${ratio}` }}
+        onPointerDown={(e) => { e.currentTarget.setPointerCapture(e.pointerId); setDrag(true); jump(e.clientY, true); }}
+        onPointerMove={(e) => drag && jump(e.clientY, false)}
+        onPointerUp={() => setDrag(false)} onPointerCancel={() => setDrag(false)}>
+        <img src={src} alt="" referrerPolicy="no-referrer" draggable={false} onLoad={(e) => setRatio(e.target.naturalHeight / e.target.naturalWidth)} />
+        <span className="mm-view" style={{ top: `${v.top * 100}%`, height: `${Math.max(v.h * 100, 4)}%` }} />
+      </div>
+      <span className="mm-pct">{v.pct}%</span>
+    </div>
+  );
+}
+
+/* Category picker: styled popover that matches the app, opens upward from the footer or composer. */
+function CategoryPicker({ value, onChange, allowAuto, className = "" }) {
+  const [open, setOpen] = useState(false);
+  const wrap = useRef(null);
+  const list = useRef(null);
+  const options = allowAuto ? ["", ...TYPES] : TYPES;
+  useEffect(() => {
+    if (!open) return;
+    const off = (e) => { if (!wrap.current?.contains(e.target)) setOpen(false); };
+    document.addEventListener("pointerdown", off);
+    const t = setTimeout(() => list.current?.querySelector('[aria-selected="true"]')?.focus(), 30);
+    return () => { document.removeEventListener("pointerdown", off); clearTimeout(t); };
+  }, [open]);
+  const onKey = (e) => {
+    const btns = [...(list.current?.querySelectorAll("button") || [])];
+    const i = btns.indexOf(document.activeElement);
+    const cols = 2;
+    const move = { ArrowDown: cols, ArrowUp: -cols, ArrowRight: 1, ArrowLeft: -1 }[e.key];
+    if (move) { e.preventDefault(); e.stopPropagation(); btns[Math.min(btns.length - 1, Math.max(0, i + move))]?.focus(); }
+    if (e.key === "Escape") { e.stopPropagation(); setOpen(false); wrap.current?.querySelector(".cp-trigger")?.focus(); }
+  };
+  const dot = (t) => (t ? color(t) : "linear-gradient(135deg,#7c9cf0,#ef8fb0)");
+  return (
+    <div className={"cp " + className} ref={wrap} onKeyDown={onKey}>
+      <button type="button" className={"cp-trigger" + (open ? " open" : "")} aria-haspopup="listbox" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
+        <i style={{ background: dot(value) }} />{value || "Auto-detect"}
+        <svg className="cp-chev" width="12" height="12" viewBox="0 0 12 12" aria-hidden><path d="M3 4.5L6 7.5 9 4.5" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" /></svg>
+      </button>
+      <AnimatePresence>
+        {open && (
+          <motion.div className="cp-pop" role="listbox" aria-label="Category" ref={list}
+            initial={{ opacity: 0, y: 8, scale: 0.97 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: 6, scale: 0.98, transition: { duration: 0.12 } }} transition={spring}>
+            <div className="cp-head">Category</div>
+            <div className="cp-grid">
+              {options.map((t) => (
+                <button key={t || "auto"} type="button" role="option" aria-selected={value === t} className={"cp-opt" + (value === t ? " on" : "") + (!t ? " auto" : "")}
+                  onClick={() => { onChange(t); setOpen(false); }}>
+                  <i style={{ background: dot(t) }} /><span>{t || "Auto-detect"}</span>
+                  {value === t && <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden><path d="M3 7.2l2.6 2.6L11 4.4" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg>}
+                </button>
+              ))}
+            </div>
+          </motion.div>
+        )}
       </AnimatePresence>
-      {adding ? (
-        <span className="tag-add-wrap">
-          <input autoFocus value={d} placeholder="tag, Enter" aria-label="New tag" onChange={(e) => setD(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" || e.key === ",") { e.preventDefault(); add(d); }
-              if (e.key === "Escape") { e.stopPropagation(); setAdding(false); setD(""); }
-              if (e.key === "Backspace" && !d && tags.length) patch(it.id, (cur) => ({ tags: (cur.tags || []).slice(0, -1) }));
-            }}
-            onBlur={() => { if (d.trim()) add(d); setAdding(false); }} />
-          {!!sugg.length && (
-            <span className="tag-sugg">
-              {sugg.map((t) => <button key={t} type="button" onMouseDown={(e) => { e.preventDefault(); add(t); }}>#{t}</button>)}
-            </span>
-          )}
-        </span>
-      ) : (
-        <button type="button" className="tag-add" onClick={() => setAdding(true)}><Icon.plus /> Tag</button>
-      )}
     </div>
   );
 }
 
 /* ---------- detail: the saved thing, its source link, delete. Nothing else. ---------- */
-function Detail({ it, onClose, patch, remove, setImage, toast, onPrev, onNext, linkFocus, allTags }) {
+function Detail({ it, onClose, patch, remove, setImage, toast, onPrev, onNext, linkFocus, pos }) {
   const [broken, setBroken] = useState(false);
   const kind = kindOf(it, broken);
   const link = safeUrl(it.url);
@@ -450,6 +497,14 @@ function Detail({ it, onClose, patch, remove, setImage, toast, onPrev, onNext, l
               ))}
             </div>
           )}
+          {pos.total > 1 && (
+            <div className="pager" aria-label="Browse">
+              <button type="button" onClick={onPrev} aria-label="Previous (Left arrow)" title="Previous  ←"><Icon.left /></button>
+              <span>{pos.index} <em>/ {pos.total}</em></span>
+              <button type="button" onClick={onNext} aria-label="Next (Right arrow)" title="Next  →"><Icon.right /></button>
+            </div>
+          )}
+          <span className="vsep" />
           <button type="button" className="icon-btn" onClick={onClose} aria-label="Close" data-autofocus><Icon.x /></button>
         </div>
       </header>
@@ -460,16 +515,11 @@ function Detail({ it, onClose, patch, remove, setImage, toast, onPrev, onNext, l
           : kind === "quote" ? <div className="stage-center"><p className="stage-quote">“{it.note || it.title}”</p></div>
           : kind === "note" ? <div className="stage-center"><p className="stage-note">{it.note || it.title}</p></div>
           : <div className="stage-center"><div className="stage-empty"><Favicon it={it} size={40} /><b>{it.title || niceName(it.url)}</b><span>Live preview needs an https link. Drop or paste a screenshot here to keep a copy.</span></div></div>}
-        <button type="button" className="arrow prev" onClick={onPrev} aria-label="Previous"><Icon.left /></button>
-        <button type="button" className="arrow next" onClick={onNext} aria-label="Next"><Icon.right /></button>
       </div>
 
       <footer className="dv-foot">
         <div className="foot-left">
-          <label className="found-chip" title="Category"><i style={{ background: color(it.type) }} />
-            <select value={it.type} aria-label="Category" onChange={(e) => patch(it.id, { type: e.target.value, autoType: false })}>{TYPES.map((t) => <option key={t}>{t}</option>)}</select>
-          </label>
-          <TagRow it={it} patch={patch} allTags={allTags} />
+          <CategoryPicker value={it.type} onChange={(t) => patch(it.id, { type: t, autoType: false })} />
         </div>
 
         <div className="source">
@@ -535,13 +585,7 @@ function Composer({ onText, onFile, onClose }) {
         <button type="button" className="ghost-btn" onClick={() => file.current.click()}><Icon.image /> Media</button>
         <input ref={file} type="file" hidden multiple accept="image/png,image/jpeg,image/gif,image/webp,image/svg+xml,video/mp4,video/webm"
           onChange={(e) => { addFiles(e.target.files); e.target.value = ""; }} />
-        <label className="type-select">
-          <i style={{ background: type ? color(type) : "linear-gradient(#7c9cf0,#ef8fb0)" }} />
-          <select value={type} onChange={(e) => setType(e.target.value)} aria-label="Category">
-            <option value="">Auto-detect</option>
-            {TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
-          </select>
-        </label>
+        <CategoryPicker value={type} onChange={setType} allowAuto className="in-composer" />
         <span className="composer-hint">{files.length && text && !isLink ? "Link needs https://" : ""}</span>
         <button type="button" className="black-pill sm" disabled={!canSave} onClick={submit}>Save</button>
       </div>
@@ -752,13 +796,14 @@ export default function App() {
   }, [items, openId, toast]);
 
   const current = openId ? items.find((i) => i.id === openId) : null;
+  const navList = flatList.length && flatList.some((x) => x.id === openId) ? flatList : items;
+  const pos = { index: navList.findIndex((x) => x.id === openId) + 1, total: navList.length };
   useEffect(() => { if (openId && ready && !current) setOpenId(null); }, [openId, current, ready]);
   const step = useCallback((d) => {
-    const l = flatList.length ? flatList : items;
-    if (!l.length) return;
-    const i = l.findIndex((x) => x.id === openId);
-    setOpenId(l[(i + d + l.length) % l.length].id);
-  }, [flatList, items, openId]);
+    if (!navList.length) return;
+    const i = navList.findIndex((x) => x.id === openId);
+    setOpenId(navList[(i + d + navList.length) % navList.length].id);
+  }, [navList, openId]);
 
   /* --- keyboard, paste, drop --- */
   useEffect(() => {
@@ -902,7 +947,7 @@ export default function App() {
       <Modal open={!!current} onClose={() => { setOpenId(null); setLinkFocus(null); }} label="Reference" className="detail">
         {current && (
           <Detail key={current.id} it={current} onClose={() => { setOpenId(null); setLinkFocus(null); }} patch={patch} remove={remove} setImage={setImage}
-            toast={toast} onPrev={() => step(-1)} onNext={() => step(1)} linkFocus={linkFocus === current.id} allTags={tagList} />
+            toast={toast} onPrev={() => step(-1)} onNext={() => step(1)} linkFocus={linkFocus === current.id} pos={pos} />
         )}
       </Modal>
       <Modal open={backup} onClose={() => setBackup(false)} label="Backup" className="small">
